@@ -1,0 +1,13 @@
+{
+  "event_id": "E00001",
+  "user_id": "U001",
+  "task_id": "MATH",
+  "occurrence_id": "MATH_2026-09-14",
+  "timestamp": "2026-09-14T18:55:00+07:00",
+  "event_type": "REMINDER_SENT",
+  "data": {
+    "prompt_level": 1,
+    "reminder_type": "generic",
+    "channel": "buddy"
+  }
+}

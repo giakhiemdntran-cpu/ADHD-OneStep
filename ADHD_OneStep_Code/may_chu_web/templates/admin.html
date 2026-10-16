@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OneStep Admin</title>
+<style>
+:root{--bg:#eef7f5;--card:#fff;--ink:#21323a;--muted:#6c7d82;--line:#dce8e5;--accent:#3a7d78;--danger:#b44d4d}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
+.wrap{max-width:1100px;margin:auto;padding:24px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:360px 1fr;gap:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:18px}
+input,textarea,select{width:100%;padding:11px;border:1px solid #cad9d6;border-radius:10px;margin:5px 0 12px}
+button{border:0;border-radius:10px;padding:10px 14px;background:var(--accent);color:#fff}
+.danger{background:var(--danger)}
+.task{padding:13px 0;border-bottom:1px solid var(--line)}
+.meta{color:var(--muted);font-size:14px;margin:5px 0 10px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.days input{width:auto}.days label{margin-right:8px}
+.current{margin-bottom:18px;background:#f9fcfb}
+.history{margin-top:18px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top">
+  <div>
+    <h1>OneStep Admin</h1>
+    <div class="meta">Một trang duy nhất • tự đồng bộ mỗi 2 giây</div>
+  </div>
+  <div id="conn">● Online</div>
+</div>
+
+<div class="card current">
+  <strong>Buddy đang thấy:</strong>
+  <div id="current">Đang tải...</div>
+</div>
+
+<div class="grid">
+<section class="card">
+<h2 id="formTitle">Tạo nhiệm vụ</h2>
+
+<input id="id" type="hidden">
+
+<label>Tên</label>
+<input id="title">
+
+<label>Các bước (mỗi dòng)</label>
+<textarea id="steps" rows="5"></textarea>
+
+<label>Loại</label>
+<select id="type" onchange="toggleType()">
+  <option value="once">Một lần</option>
+  <option value="weekly">Lặp theo tuần</option>
+</select>
+
+<div id="onceBox">
+  <label>Ngày giờ</label>
+  <input id="scheduledAt" type="datetime-local">
+  <div class="meta">Bỏ trống = 10 phút sau</div>
+</div>
+
+<div id="weeklyBox" style="display:none">
+  <label>Giờ</label>
+  <input id="scheduledTime" type="time">
+
+  <div class="days">
+    <label><input type="checkbox" value="MON">T2</label>
+    <label><input type="checkbox" value="TUE">T3</label>
+    <label><input type="checkbox" value="WED">T4</label>
+    <label><input type="checkbox" value="THU">T5</label>
+    <label><input type="checkbox" value="FRI">T6</label>
+    <label><input type="checkbox" value="SAT">T7</label>
+    <label><input type="checkbox" value="SUN">CN</label>
+  </div>
+</div>
+
+<label>
+  <input id="enabled" type="checkbox" checked style="width:auto">
+  Đang bật
+</label>
+
+<div class="row">
+  <button onclick="save()">Lưu</button>
+  <button onclick="resetForm()">Mới</button>
+</div>
+</section>
+
+<section class="card">
+<h2>Task đang hoạt động</h2>
+<div id="tasks"></div>
+</section>
+</div>
+
+<section class="card history">
+<h2>Lịch sử</h2>
+<div id="history"></div>
+</section>
+</div>
+
+<script>
+let cache=[];
+const $=id=>document.getElementById(id);
+
+function toggleType(){
+    let w=$('type').value==='weekly';
+    $('onceBox').style.display=w?'none':'block';
+    $('weeklyBox').style.display=w?'block':'none';
+}
+
+function days(){
+    return [...document.querySelectorAll('.days input:checked')].map(x=>x.value);
+}
+
+function resetForm(){
+    $('id').value='';
+    $('title').value='';
+    $('steps').value='';
+    $('type').value='once';
+    $('scheduledAt').value='';
+    $('scheduledTime').value='';
+    $('enabled').checked=true;
+    document.querySelectorAll('.days input').forEach(x=>x.checked=false);
+    $('formTitle').textContent='Tạo nhiệm vụ';
+    toggleType();
+}
+
+function render(s){
+    cache=s.tasks||[];
+
+    $('tasks').innerHTML=cache.length
+      ? cache.map(t=>`
+        <div class="task">
+          <strong>${t.title}</strong>
+          <div class="meta">
+            ${
+              t.schedule_type==='once'
+              ? (t.scheduled_at||'Chưa có giờ')
+              : 'Lặp '+(t.repeat_days||[]).join(', ')+' • '+(t.scheduled_time||'')
+            }
+            • tạo bởi ${t.created_by}
+          </div>
+          <div class="row">
+            <button onclick="editTask(${t.id})">Sửa</button>
+            <button onclick="cancelTask(${t.id})">Hủy</button>
+            <button class="danger" onclick="delTask(${t.id})">Xóa</button>
+          </div>
+        </div>
+      `).join('')
+      : 'Chưa có task';
+
+    let c=s.current||{};
+
+    $('current').textContent=c.done
+      ? 'Không có task'
+      : `${c.task_name} • ${c.current_step} • ${c.scheduled_at}`;
+
+    $('history').innerHTML=(s.history||[]).length
+      ? s.history.map(h=>`
+        <div class="task">
+          <strong>${h.title}</strong>
+          <div class="meta">
+            ${h.completed_at} • ${h.final_status}
+          </div>
+        </div>
+      `).join('')
+      : 'Chưa có lịch sử';
+}
+
+async function load(){
+    try{
+        render(await (await fetch('/api/state')).json());
+        $('conn').textContent='● Online';
+    }catch(e){
+        $('conn').textContent='● Mất kết nối';
+    }
+}
+
+async function save(){
+    let p={
+      title:$('title').value.trim(),
+      steps:$('steps').value.split('\n').map(x=>x.trim()).filter(Boolean),
+      schedule_type:$('type').value,
+      scheduled_at:$('scheduledAt').value||null,
+      scheduled_time:$('scheduledTime').value||null,
+      repeat_days:days(),
+      enabled:$('enabled').checked
+    };
+
+    let i=$('id').value;
+
+    let r=await fetch(
+      i?'/api/tasks/'+i:'/api/tasks',
+      {
+        method:i?'PUT':'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(p)
+      }
+    );
+
+    let d=await r.json();
+
+    if(!d.success){
+      alert(d.message);
+      return;
+    }
+
+    resetForm();
+    load();
+}
+
+function editTask(i){
+    let t=cache.find(x=>x.id===i);
+
+    $('id').value=t.id;
+    $('title').value=t.title;
+    $('steps').value=(t.steps||[]).join('\n');
+    $('type').value=t.schedule_type;
+    $('scheduledAt').value=t.scheduled_at||'';
+    $('scheduledTime').value=t.scheduled_time||'';
+    $('enabled').checked=!!t.enabled;
+
+    document.querySelectorAll('.days input').forEach(
+      x=>x.checked=(t.repeat_days||[]).includes(x.value)
+    );
+
+    $('formTitle').textContent='Sửa nhiệm vụ';
+    toggleType();
+
+    scrollTo({top:0,behavior:'smooth'});
+}
+
+async function cancelTask(i){
+    if(!confirm('Hủy task này?')) return;
+    await fetch('/api/tasks/'+i+'/cancel',{method:'POST'});
+    load();
+}
+
+async function delTask(i){
+    if(!confirm('Xóa task này hoàn toàn?')) return;
+    await fetch('/api/tasks/'+i,{method:'DELETE'});
+    load();
+}
+
+load();
+toggleType();
+setInterval(load,2000);
+</script>
+</body>
+</html>

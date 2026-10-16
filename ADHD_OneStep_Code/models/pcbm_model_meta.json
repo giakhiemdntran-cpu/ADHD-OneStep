@@ -1,0 +1,68 @@
+{
+  "source": "sqlite:pcbm_events",
+  "trained_at": "2026-10-01T07:58:24",
+  "events": 4133,
+  "records": 864,
+  "users": 12,
+  "user_ids": [
+    "test_U001",
+    "test_U002",
+    "test_U003",
+    "test_U004",
+    "test_U005",
+    "test_U006",
+    "test_U007",
+    "test_U008",
+    "test_U009",
+    "test_U010",
+    "test_U011",
+    "test_U012"
+  ],
+  "recall_model": {
+    "path": "/mnt/data/ADHD_OneStep_Buddy_OneBand_v9_9_3_Refactor_Code_TiengViet/models/pcbm_recall.joblib",
+    "training_rows": 864,
+    "positive_rate": 0.6863425925925926,
+    "evaluation": {
+      "available": true,
+      "train_rows": 691,
+      "test_rows": 173,
+      "accuracy": 0.6184971098265896,
+      "recall": 1.0,
+      "confusion_matrix": [
+        [
+          0,
+          66
+        ],
+        [
+          0,
+          107
+        ]
+      ],
+      "roc_auc": 0.5563579722458227
+    }
+  },
+  "completion_model": {
+    "path": "/mnt/data/ADHD_OneStep_Buddy_OneBand_v9_9_3_Refactor_Code_TiengViet/models/pcbm_completion.joblib",
+    "training_rows": 864,
+    "positive_rate": 0.47685185185185186,
+    "evaluation": {
+      "available": true,
+      "train_rows": 691,
+      "test_rows": 173,
+      "accuracy": 0.6589595375722543,
+      "recall": 0.7027027027027027,
+      "confusion_matrix": [
+        [
+          62,
+          37
+        ],
+        [
+          22,
+          52
+        ]
+      ],
+      "roc_auc": 0.716898716898717
+    }
+  },
+  "note": "Mô hình được huấn luyện trực tiếp từ lịch sử sự kiện trong SQLite. Đặc trưng lịch sử được tính riêng theo từng user_id."
+}
