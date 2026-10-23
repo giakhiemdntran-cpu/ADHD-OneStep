@@ -10,6 +10,7 @@ import sounddevice as sd
 import speech_recognition as sr
 
 from dich_vu.quan_ly_am_thanh import audio_lock, sau_dau_vao_giai_phong
+from dich_vu.cai_dat_nguoi_dung import tai_cai_dat
 
 from cau_hinh import (
     VOICE_SAMPLE_RATE,
@@ -50,15 +51,18 @@ class DichVuNhanDangGiongNoi:
         python-sounddevice giá trị này là ``_InputOutputPair``. Thay vào đó, để
         PortAudio/PulseAudio/PipeWire tự phân giải input mặc định của Ubuntu.
         """
-        info = sd.query_devices(kind="input")
+        settings = tai_cai_dat()
+        input_device = settings.get("audio_input_device")
+        if input_device is None:
+            info = sd.query_devices(kind="input")
+        else:
+            info = sd.query_devices(int(input_device), "input")
+
         native_rate = int(round(float(info["default_samplerate"])))
         if native_rate <= 0:
-            raise RuntimeError("Microphone mặc định không cung cấp sample rate hợp lệ")
+            raise RuntimeError("Microphone không cung cấp sample rate hợp lệ")
 
-        # None có nghĩa: không truyền device=... vào InputStream, dùng đúng
-        # microphone mặc định mà Ubuntu/PulseAudio/PipeWire đang chọn.
-        input_device = None
-        self.last_input_device = None
+        self.last_input_device = input_device
         self.last_native_sample_rate = native_rate
         return input_device, info, native_rate
 
@@ -129,7 +133,7 @@ class DichVuNhanDangGiongNoi:
 
         print("[STT] Đang chờ bạn nói...")
         print(
-            f"[MIC] Default input: {device_name} | "
+            f"[MIC] Input: {device_name} (device={input_device if input_device is not None else 'default'}) | "
             f"native={native_rate} Hz | STT={VOICE_SAMPLE_RATE} Hz"
         )
 

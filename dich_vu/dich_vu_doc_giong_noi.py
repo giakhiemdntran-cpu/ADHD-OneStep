@@ -22,6 +22,7 @@ from cau_hinh import (
     VIENEU_VOICE,
 )
 from dich_vu.quan_ly_am_thanh import audio_lock, sau_dau_ra_giai_phong
+from dich_vu.cai_dat_nguoi_dung import tai_cai_dat
 
 
 class VieNeuStreamError(RuntimeError):
@@ -140,10 +141,19 @@ class DichVuDocGiongNoi:
         """
         import sounddevice as sd
 
+        settings = tai_cai_dat()
+        voice = settings.get("vieneu_voice") or VIENEU_VOICE
+        start_buffer_ms = int(settings.get("vieneu_start_buffer_ms", VIENEU_START_BUFFER_MS))
+        first_audio_timeout = float(settings.get("vieneu_first_audio_timeout", VIENEU_FIRST_AUDIO_TIMEOUT))
+        stream_stall_timeout = float(settings.get("vieneu_stream_stall_timeout", VIENEU_STREAM_STALL_TIMEOUT))
+        output_device = settings.get("audio_output_device")
+        output_blocksize = int(settings.get("vieneu_output_blocksize", 2048))
+
         t0 = time.perf_counter()
         print(
-            f"[VIENEU TIMING] request start: voice={VIENEU_VOICE}, "
-            f"chars={len(text)}, backend={VIENEU_BACKEND}"
+            f"[VIENEU TIMING] request start: voice={voice}, "
+            f"chars={len(text)}, backend={VIENEU_BACKEND}, "
+            f"buffer={start_buffer_ms}ms, output={output_device if output_device is not None else 'default'}"
         )
 
         try:
@@ -159,7 +169,7 @@ class DichVuDocGiongNoi:
 
         def producer():
             try:
-                for chunk in model.infer_stream(text, voice=VIENEU_VOICE):
+                for chunk in model.infer_stream(text, voice=voice):
                     if self._stop_event.is_set():
                         break
                     arr = np.asarray(chunk, dtype=np.float32).reshape(-1)
@@ -185,7 +195,7 @@ class DichVuDocGiongNoi:
 
         start_samples = max(
             1,
-            int(VIENEU_SAMPLE_RATE * max(0, VIENEU_START_BUFFER_MS) / 1000.0),
+            int(VIENEU_SAMPLE_RATE * max(0, start_buffer_ms) / 1000.0),
         )
         pending = []
         buffered_samples = 0
@@ -195,10 +205,10 @@ class DichVuDocGiongNoi:
 
         # Chờ chunk đầu tiên tối đa N giây. Nếu chưa phát gì thì có thể fallback sạch sẽ.
         try:
-            item = audio_q.get(timeout=VIENEU_FIRST_AUDIO_TIMEOUT)
+            item = audio_q.get(timeout=first_audio_timeout)
         except queue.Empty as e:
             raise VieNeuStreamError(
-                f"first audio timeout after {VIENEU_FIRST_AUDIO_TIMEOUT:.2f}s",
+                f"first audio timeout after {first_audio_timeout:.2f}s",
                 played_audio=False,
             ) from e
 
@@ -215,8 +225,8 @@ class DichVuDocGiongNoi:
 
         # Prebuffer một lượng nhỏ để hạn chế underrun ở đầu câu.
         buffer_deadline = time.perf_counter() + max(
-            VIENEU_STREAM_STALL_TIMEOUT,
-            VIENEU_FIRST_AUDIO_TIMEOUT,
+            stream_stall_timeout,
+            first_audio_timeout,
         )
         stream_ended_while_buffering = False
 
@@ -251,17 +261,20 @@ class DichVuDocGiongNoi:
 
         try:
             # VieNeu Turbo sinh native 48 kHz float32. Dùng default output device của Ubuntu.
-            with sd.OutputStream(
+            stream_kwargs = dict(
                 samplerate=VIENEU_SAMPLE_RATE,
                 channels=1,
                 dtype="float32",
-                blocksize=0,
-            ) as stream:
+                blocksize=output_blocksize,
+            )
+            if output_device is not None:
+                stream_kwargs["device"] = int(output_device)
+            with sd.OutputStream(**stream_kwargs) as stream:
                 t_play_start = time.perf_counter()
                 played_audio = True
                 print(
                     f"[VIENEU TIMING] playback start: {t_play_start - t0:.3f}s "
-                    f"(startup target={VIENEU_START_BUFFER_MS}ms)"
+                    f"(startup target={start_buffer_ms}ms)"
                 )
 
                 # Phát phần prebuffer trước.
@@ -278,12 +291,12 @@ class DichVuDocGiongNoi:
                 if not stream_ended_while_buffering:
                     while not self._stop_event.is_set():
                         try:
-                            item = audio_q.get(timeout=VIENEU_STREAM_STALL_TIMEOUT)
+                            item = audio_q.get(timeout=stream_stall_timeout)
                         except queue.Empty as e:
                             if producer_done.is_set():
                                 break
                             raise VieNeuStreamError(
-                                f"stream stalled > {VIENEU_STREAM_STALL_TIMEOUT:.2f}s",
+                                f"stream stalled > {stream_stall_timeout:.2f}s",
                                 played_audio=True,
                             ) from e
 
@@ -319,7 +332,7 @@ class DichVuDocGiongNoi:
                 f"(play duration {t_play_end - t_play_start:.3f}s)"
             )
             print(
-                f"[VIENEU BUFFER] startup={VIENEU_START_BUFFER_MS}ms, "
+                f"[VIENEU BUFFER] startup={start_buffer_ms}ms, blocksize={output_blocksize}, "
                 f"max_queued≈{max_buffered_samples / VIENEU_SAMPLE_RATE * 1000.0:.0f}ms"
             )
 

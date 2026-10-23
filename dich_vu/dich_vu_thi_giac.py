@@ -13,6 +13,7 @@ from cau_hinh import (
     VISION_RETENTION_HOURS,
 )
 from dich_vu.dich_vu_bo_nho_vat_dung import DichVuBoNhoVatDung
+from dich_vu.cai_dat_nguoi_dung import tai_cai_dat
 
 
 ALIASES = {
@@ -106,12 +107,25 @@ class DichVuThiGiac:
         )
 
     def _mo_camera(self, cv2):
-        if VISION_CAMERA_SOURCE == "csi":
-            pipeline = self._csi_quy_trinh()
+        settings = tai_cai_dat()
+        camera_source = settings.get("camera_source", VISION_CAMERA_SOURCE)
+        camera_id = int(settings.get("camera_id", VISION_CAMERA_ID))
+        csi_sensor_id = int(settings.get("csi_sensor_id", VISION_CSI_SENSOR_ID))
+
+        if camera_source == "csi":
+            pipeline = (
+                f"nvarguscamerasrc sensor-id={csi_sensor_id} ! "
+                f"video/x-raw(memory:NVMM),width={VISION_CSI_WIDTH},height={VISION_CSI_HEIGHT},"
+                f"framerate={VISION_CSI_FPS}/1 ! "
+                "nvvidconv ! video/x-raw,format=BGRx ! "
+                "videoconvert ! video/x-raw,format=BGR ! "
+                "appsink drop=true max-buffers=1 sync=false"
+            )
             print("[VISION CAMERA] CSI:", pipeline)
             return cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-        print("[VISION CAMERA] USB/V4L2:", VISION_CAMERA_ID)
-        return cv2.VideoCapture(VISION_CAMERA_ID)
+
+        print("[VISION CAMERA] USB/V4L2:", camera_id)
+        return cv2.VideoCapture(camera_id)
 
     @staticmethod
     def _vung_tu_khung(x1, y1, x2, y2, frame_w):

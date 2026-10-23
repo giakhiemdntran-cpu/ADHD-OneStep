@@ -23,6 +23,8 @@ from dich_vu.thoi_gian_chay import lay_dich_vu_thi_giac
 from dich_vu.dich_vu_vong_deo import DichVuVongDeo
 from dich_vu.dich_vu_pcbm import DichVuPCBM
 from tro_ly.bo_dinh_tuyen_y_dinh import BoDinhTuyenYDinh
+from tro_ly.cua_so_cai_dat import CuaSoCaiDat
+from tro_ly.cua_so_tro_giup import CuaSoTroGiup
 
 
 class KenhTinHieu(QObject):
@@ -152,6 +154,36 @@ class CuaSoTroLy(QWidget):
         self.nut_chuyen_giao_dien.clicked.connect(self.chuyen_giao_dien)
         top_bar.addWidget(self.nut_chuyen_giao_dien)
 
+        # Nút Settings: thiết bị audio/camera + buffer VieNeu.
+        self.nut_cai_dat = QPushButton("⚙  Cài đặt")
+        self.nut_cai_dat.setCursor(Qt.PointingHandCursor)
+        self.nut_cai_dat.setFixedHeight(44)
+        self.nut_cai_dat.setMinimumWidth(122)
+        self.nut_cai_dat.setToolTip("Cài đặt thiết bị & TTS (F2)")
+        self.nut_cai_dat.setStyleSheet(
+            "QPushButton{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:20px;"
+            "padding:7px 18px;font:600 18px Arial;color:#20303A;}"
+            "QPushButton:hover{background:#E6F3F0;}"
+            "QPushButton:pressed{background:#D8ECE7;}"
+        )
+        self.nut_cai_dat.clicked.connect(self.mo_cai_dat)
+        top_bar.addWidget(self.nut_cai_dat)
+
+        # Nút Trợ giúp: danh mục prompt mẫu theo từng tình huống.
+        self.nut_tro_giup = QPushButton("❓  Trợ giúp")
+        self.nut_tro_giup.setCursor(Qt.PointingHandCursor)
+        self.nut_tro_giup.setFixedHeight(44)
+        self.nut_tro_giup.setMinimumWidth(122)
+        self.nut_tro_giup.setToolTip("Xem câu nói mẫu với Buddy (F3)")
+        self.nut_tro_giup.setStyleSheet(
+            "QPushButton{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:20px;"
+            "padding:7px 18px;font:600 18px Arial;color:#20303A;}"
+            "QPushButton:hover{background:#E6F3F0;}"
+            "QPushButton:pressed{background:#D8ECE7;}"
+        )
+        self.nut_tro_giup.clicked.connect(self.mo_tro_giup)
+        top_bar.addWidget(self.nut_tro_giup)
+
         # Nút thoát luôn hiển thị ở góc phải, cạnh nút đổi giao diện.
         self.nut_thoat = QPushButton("⏻  Thoát")
         self.nut_thoat.setCursor(Qt.PointingHandCursor)
@@ -171,6 +203,14 @@ class CuaSoTroLy(QWidget):
         self.phim_tat_chuyen_giao_dien = QShortcut(QKeySequence("F1"), self)
         self.phim_tat_chuyen_giao_dien.setContext(Qt.ApplicationShortcut)
         self.phim_tat_chuyen_giao_dien.activated.connect(self.chuyen_giao_dien)
+
+        self.phim_tat_cai_dat = QShortcut(QKeySequence("F2"), self)
+        self.phim_tat_cai_dat.setContext(Qt.ApplicationShortcut)
+        self.phim_tat_cai_dat.activated.connect(self.mo_cai_dat)
+
+        self.phim_tat_tro_giup = QShortcut(QKeySequence("F3"), self)
+        self.phim_tat_tro_giup.setContext(Qt.ApplicationShortcut)
+        self.phim_tat_tro_giup.activated.connect(self.mo_tro_giup)
 
         self.phim_tat_thoat = QShortcut(QKeySequence("Ctrl+Q"), self)
         self.phim_tat_thoat.setContext(Qt.ApplicationShortcut)
@@ -338,6 +378,29 @@ class CuaSoTroLy(QWidget):
         self.tiep_theo_khung_hinh()
         if AUTO_LISTEN:
             QTimer.singleShot(900, self.lang_nghe)
+
+    def mo_cai_dat(self):
+        """Mở Settings. Thiết bị/buffer áp dụng từ lượt tiếp theo."""
+        dlg = CuaSoCaiDat(self)
+        if dlg.exec():
+            print("[SETTINGS] Cài đặt mới sẽ áp dụng từ lượt tiếp theo")
+            # Đưa focus về app; nếu đang ở chat thì trả focus cho ô nhập.
+            if self.ngan_xep_giao_dien.currentWidget() is self.trang_chat:
+                self.o_nhap_chat.setFocus()
+
+    def mo_tro_giup(self):
+        """Mở danh mục prompt mẫu và có thể đưa câu được chọn vào ô Chat."""
+        dlg = CuaSoTroGiup(self)
+        if dlg.exec() and dlg.prompt_da_chon:
+            self.ngan_xep_giao_dien.setCurrentWidget(self.trang_chat)
+            self.nut_chuyen_giao_dien.setText("🤖  Khuôn mặt")
+            self.o_nhap_chat.setText(dlg.prompt_da_chon)
+            self.o_nhap_chat.setFocus()
+            self.o_nhap_chat.setCursorPosition(len(dlg.prompt_da_chon))
+            sb = self.lich_su_chat.verticalScrollBar()
+            sb.setValue(sb.maximum())
+        elif self.ngan_xep_giao_dien.currentWidget() is self.trang_chat:
+            self.o_nhap_chat.setFocus()
 
     def thoat_ung_dung(self):
         """Dừng audio/timer rồi thoát OneStep Buddy một cách gọn gàng."""
