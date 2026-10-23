@@ -500,15 +500,246 @@ class DichVuHuanLuyen:
         self.ghi_nhat_ky("COMPLETED", result.get("task_id"), result.get("occurrence_id"), key,
                  {"actual_minutes": actual, "start_delay_minutes": result.get("start_delay_minutes")})
 
+    def _ho_so_pcbm_tu_su_kien(self, habit_key=None):
+        """
+        Tạo hồ sơ thói quen chỉ-đọc từ bảng pcbm_events.
+
+        Bộ dữ liệu PCBM v4.1 large được import vào pcbm_events để huấn luyện mô hình,
+        trong khi màn hình "Huấn luyện ghi nhớ" trước đây chỉ đọc habit_profiles.
+        Vì vậy dữ liệu huấn luyện lớn có thể đã tồn tại nhưng giao diện vẫn trống.
+
+        Hàm này KHÔNG ghi ngược vào habit_profiles và KHÔNG tác động vòng lặp huấn luyện
+        2→1→0 đang chạy thực tế. Mỗi user/task của dữ liệu PCBM được trình bày như một
+        hồ sơ tổng hợp với khóa dạng <user_id>:<task_id>.
+        """
+        with lay_ket_noi_csdl() as c:
+            rows = c.execute(
+                """
+                SELECT user_id, task_id, event_type, data_json, created_at
+                FROM pcbm_events
+                ORDER BY user_id, task_id, created_at, id
+                """
+            ).fetchall()
+
+        by_key = {}
+        for row in rows:
+            r = dict(row)
+            uid = str(r.get("user_id") or "local_user")
+            task_id = str(r.get("task_id") or "")
+            key = f"{uid}:{task_id}"
+            if habit_key and habit_key not in {key, task_id}:
+                continue
+            try:
+                data = json.loads(r.get("data_json") or "{}")
+            except Exception:
+                data = {}
+
+            h = by_key.setdefault(key, {
+                "habit_key": key,
+                "user_id": uid,
+                "task_code": task_id,
+                "label": task_id or "Nhiệm vụ",
+                "prompt_level": None,
+                "memory_success_streak": 0,
+                "memory_failure_streak": 0,
+                "total_completed": 0,
+                "total_snoozes": 0,
+                "recall_successes": 0,
+                "recall_failures": 0,
+                "avg_actual_minutes": None,
+                "last_memory_result": None,
+                "last_execution_result": None,
+                "last_response_at": None,
+                "last_completed_at": None,
+                "updated_at": r.get("created_at"),
+                "source": "pcbm_events",
+                "_actual_minutes": [],
+                "_recall_seq": [],
+            })
+            h["updated_at"] = r.get("created_at") or h["updated_at"]
+            et = str(r.get("event_type") or "").upper()
+
+            if et == "TASK_CREATED":
+                if data.get("title"):
+                    h["label"] = data.get("title")
+            elif et == "REMINDER_SENT":
+                if data.get("prompt_level") is not None:
+                    try:
+                        h["prompt_level"] = int(data.get("prompt_level"))
+                    except Exception:
+                        pass
+            elif et == "RECALL_SUCCESS":
+                h["recall_successes"] += 1
+                h["last_memory_result"] = "remembered"
+                h["last_response_at"] = r.get("created_at")
+                h["_recall_seq"].append(True)
+            elif et == "RECALL_FAILURE":
+                h["recall_failures"] += 1
+                h["last_memory_result"] = "forgot"
+                h["last_response_at"] = r.get("created_at")
+                h["_recall_seq"].append(False)
+            elif et == "USER_REMEMBERED":
+                h["last_memory_result"] = "remembered_delayed"
+                h["last_response_at"] = r.get("created_at")
+            elif et == "USER_FORGOT":
+                h["last_memory_result"] = "forgot_delayed"
+                h["last_response_at"] = r.get("created_at")
+            elif et == "SNOOZE":
+                h["total_snoozes"] += 1
+            elif et == "TASK_COMPLETED":
+                h["total_completed"] += 1
+                h["last_completed_at"] = r.get("created_at")
+                h["last_execution_result"] = "completed"
+                try:
+                    actual = float(data.get("actual_minutes"))
+                    h["_actual_minutes"].append(actual)
+                except Exception:
+                    pass
+
+        result = []
+        for h in by_key.values():
+            seq = h.pop("_recall_seq", [])
+            actuals = h.pop("_actual_minutes", [])
+            if actuals:
+                h["avg_actual_minutes"] = round(sum(actuals) / len(actuals), 2)
+            if seq:
+                last = seq[-1]
+                streak = 0
+                for v in reversed(seq):
+                    if v != last:
+                        break
+                    streak += 1
+                if last:
+                    h["memory_success_streak"] = streak
+                    h["memory_failure_streak"] = 0
+                else:
+                    h["memory_success_streak"] = 0
+                    h["memory_failure_streak"] = streak
+            result.append(h)
+
+        result.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+        return result
+
     def lay_tien_do(self, habit_key=None):
         with lay_ket_noi_csdl() as c:
             if habit_key:
                 rows = c.execute("SELECT * FROM habit_profiles WHERE habit_key=?", (habit_key,)).fetchall()
             else:
                 rows = c.execute("SELECT * FROM habit_profiles ORDER BY updated_at DESC").fetchall()
-        return [dict(x) for x in rows]
+        native = [dict(x) for x in rows]
+        for x in native:
+            x.setdefault("source", "habit_profiles")
+        # Hiển thị đồng thời dữ liệu thật và dữ liệu PCBM import; không ghi dữ liệu sample
+        # vào habit_profiles để tránh can thiệp vào vòng huấn luyện 2→1→0 của người dùng thật.
+        return native + self._ho_so_pcbm_tu_su_kien(habit_key)
+
+    def _kiem_tra_pcbm_tu_su_kien(self, limit=100):
+        """Dựng các lần kiểm tra ghi nhớ từ generic cue của PCBM v4."""
+        with lay_ket_noi_csdl() as c:
+            rows = c.execute(
+                """
+                SELECT id,user_id,task_id,occurrence_id,event_type,data_json,created_at
+                FROM pcbm_events
+                ORDER BY created_at ASC, id ASC
+                """
+            ).fetchall()
+
+        created = {}
+        reminders = {}
+        outcomes = {}
+        for row in rows:
+            r = dict(row)
+            occ = str(r.get("occurrence_id") or "")
+            if not occ:
+                continue
+            try:
+                data = json.loads(r.get("data_json") or "{}")
+            except Exception:
+                data = {}
+            et = str(r.get("event_type") or "").upper()
+            if et == "TASK_CREATED":
+                created[occ] = data
+            elif et == "REMINDER_SENT" and str(data.get("reminder_type") or "").lower() == "generic":
+                reminders[occ] = (r, data)
+            elif et in {"RECALL_SUCCESS", "RECALL_FAILURE"}:
+                # Chỉ giữ phản hồi recall đầu tiên sau generic cue cho occurrence này.
+                outcomes.setdefault(occ, r)
+
+        result = []
+        for occ, (rem, rdata) in reminders.items():
+            out = outcomes.get(occ)
+            task_meta = created.get(occ, {})
+            uid = str(rem.get("user_id") or "local_user")
+            task_id = str(rem.get("task_id") or "")
+            success = bool(out and str(out.get("event_type")).upper() == "RECALL_SUCCESS")
+            result.append({
+                "id": f"pcbm:{rem.get('id')}",
+                "user_id": uid,
+                "occurrence_id": occ,
+                "task_id": task_id,
+                "task_title": task_meta.get("title") or task_id,
+                "habit_key": f"{uid}:{task_id}",
+                "prompt_level": rdata.get("prompt_level"),
+                "scheduled_at": rem.get("created_at"),
+                "check_due_at": rem.get("created_at"),
+                "status": "closed_sample" if out else "sample_no_recall_label",
+                "prompt_sent_at": rem.get("created_at"),
+                "memory_result": ("remembered" if success else "forgot") if out else None,
+                "response_text": str(out.get("event_type")) if out else None,
+                "created_at": rem.get("created_at"),
+                "updated_at": out.get("created_at") if out else rem.get("created_at"),
+                "source": "pcbm_events",
+            })
+
+        result.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+        return result[:max(1, int(limit))]
 
     def lay_kiem_tra_ghi_nho(self, limit=100):
+        limit = max(1, int(limit))
         with lay_ket_noi_csdl() as c:
-            rows = c.execute("SELECT * FROM memory_checks ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
-        return [dict(x) for x in rows]
+            rows = c.execute("SELECT * FROM memory_checks ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        native = [dict(x) for x in rows]
+        for x in native:
+            x.setdefault("source", "memory_checks")
+        if len(native) >= limit:
+            return native[:limit]
+        return native + self._kiem_tra_pcbm_tu_su_kien(limit - len(native))
+
+    def lay_su_kien_huan_luyen(self, limit=100):
+        """Kết hợp coaching_events thật với nhật ký PCBM import để màn hình không bị trống."""
+        limit = max(1, int(limit))
+        with lay_ket_noi_csdl() as c:
+            native = [dict(x) for x in c.execute(
+                "SELECT * FROM coaching_events ORDER BY created_at DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()]
+            pcbm_rows = c.execute(
+                """
+                SELECT id,user_id,task_id,occurrence_id,event_type,data_json,created_at
+                FROM pcbm_events
+                ORDER BY created_at DESC, id DESC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        merged = []
+        for x in native:
+            x["source"] = "coaching_events"
+            merged.append(x)
+        for row in pcbm_rows:
+            r = dict(row)
+            uid = str(r.get("user_id") or "local_user")
+            task_id = str(r.get("task_id") or "")
+            merged.append({
+                "id": f"pcbm:{r.get('id')}",
+                "user_id": uid,
+                "task_id": task_id,
+                "occurrence_id": r.get("occurrence_id"),
+                "habit_key": f"{uid}:{task_id}",
+                "event_type": r.get("event_type"),
+                "payload": r.get("data_json") or "{}",
+                "created_at": r.get("created_at"),
+                "source": "pcbm_events",
+            })
+        merged.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        return merged[:limit]

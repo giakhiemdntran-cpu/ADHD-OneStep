@@ -195,6 +195,9 @@ def khoi_tao_co_so_du_lieu():
             completion_model_path TEXT,
             created_at TEXT NOT NULL
         )""")
+        # PCBM v4: lưu rõ phiên bản pipeline/dataset của từng lần huấn luyện.
+        _them_cot(c, "pcbm_training_runs", "training_version TEXT")
+        _them_cot(c, "pcbm_training_runs", "dataset_name TEXT")
 
         c.commit()
 

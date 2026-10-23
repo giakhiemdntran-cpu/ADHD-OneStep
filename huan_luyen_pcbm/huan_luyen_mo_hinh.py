@@ -1,113 +1,63 @@
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 
 import joblib
-import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.impute import SimpleImputer
-from sklearn.ensemble import RandomForestClassifier
 
 from huan_luyen_pcbm.xay_dung_du_lieu import tai_du_lieu_jsonl, xay_dung_ban_ghi_hoc
-
-DROP_COLUMNS = {
-    "user_id",
-    "occurrence_id",
-    "decision_time",
-    "feature_schema_version",
-    "label_schema_version",
-    "pipeline_version",
-}
-
-ALL_LABELS = {
-    "y_recall_success",
-    "y_started_within_10m",
-    "y_start_delay_minutes",
-    "y_complete_within_30m",
-    "y_complete_within_60m",
-    "y_completion_delay_minutes",
-    "y_snooze",
-    "y_forgot",
-}
-
-
-def _huan_luyen(df, target):
-    work = df[df[target].notna()].copy()
-    if len(work) < 4:
-        raise RuntimeError(f"Không đủ dữ liệu có nhãn cho {target}")
-
-    feature_cols = [
-        c for c in work.columns
-        if c not in DROP_COLUMNS and c not in ALL_LABELS
-    ]
-    X = work[feature_cols]
-    y = work[target].astype(int)
-
-    cat_cols = [c for c in feature_cols if X[c].dtype == "object"]
-    num_cols = [c for c in feature_cols if c not in cat_cols]
-
-    pre = ColumnTransformer([
-        ("num", Pipeline([
-            ("imputer", SimpleImputer(strategy="median"))
-        ]), num_cols),
-        ("cat", Pipeline([
-            ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("onehot", OneHotEncoder(handle_unknown="ignore"))
-        ]), cat_cols),
-    ])
-
-    model = RandomForestClassifier(
-        n_estimators=250,
-        max_depth=8,
-        random_state=42,
-        class_weight="balanced",
-    )
-
-    pipe = Pipeline([
-        ("preprocess", pre),
-        ("model", model),
-    ])
-    pipe.fit(X, y)
-
-    return {
-        "pipeline": pipe,
-        "feature_columns": feature_cols,
-        "target": target,
-        "training_rows": len(work),
-        "positive_rate": float(y.mean()),
-        "model_name": "RandomForestClassifier",
-        "source": "sample_events",
-    }
+from huan_luyen_pcbm.huan_luyen_tu_csdl import _huan_luyen_cuoi, TRAINING_VERSION
 
 
 def chay_chuong_trinh():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--input", default="data/sample_events.jsonl")
+    ap = argparse.ArgumentParser(description="Huấn luyện PCBM từ file JSONL")
+    ap.add_argument("--input", default="data/sample_events_4133.jsonl")
     ap.add_argument("--model-dir", default="models")
     args = ap.parse_args()
 
     events = tai_du_lieu_jsonl(args.input)
     df = xay_dung_ban_ghi_hoc(events)
-
     model_dir = Path(args.model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
+    source = f"jsonl:{Path(args.input).name}"
 
-    recall = _huan_luyen(df, "y_recall_success")
-    completion = _huan_luyen(df, "y_complete_within_30m")
+    recall = _huan_luyen_cuoi(df, "y_recall_success", source)
+    completion = _huan_luyen_cuoi(df, "y_complete_within_30m", source)
 
     recall_path = model_dir / "pcbm_recall.joblib"
     completion_path = model_dir / "pcbm_completion.joblib"
     joblib.dump(recall, recall_path)
     joblib.dump(completion, completion_path)
 
+    users = sorted({str(e["user_id"]) for e in events})
     meta = {
-        "records": len(df),
+        "training_version": TRAINING_VERSION,
+        "source": source,
+        "trained_at": datetime.now().isoformat(timespec="seconds"),
         "events": len(events),
-        "recall_model": str(recall_path),
-        "completion_model": str(completion_path),
-        "note": "Model demo được train từ sample input, không phải model cá nhân thật.",
+        "records": len(df),
+        "users": len(users),
+        "user_ids": users,
+        "dataset_summary": {
+            "generic_cue_records": int((df["reminder_type"].astype(str).str.lower() == "generic").sum()),
+            "recall_labeled_records": int(df["y_recall_success"].notna().sum()),
+            "recall_label_definition": "RECALL_SUCCESS/FAILURE within 2 minutes after generic cue only",
+        },
+        "recall_model": {
+            "path": str(recall_path),
+            "model_name": recall["model_name"],
+            "training_rows": recall["training_rows"],
+            "positive_rate": recall["positive_rate"],
+            "evaluation": recall["evaluation"],
+        },
+        "completion_model": {
+            "path": str(completion_path),
+            "model_name": completion["model_name"],
+            "training_rows": completion["training_rows"],
+            "positive_rate": completion["positive_rate"],
+            "evaluation": completion["evaluation"],
+        },
+        "note": "PCBM sample/file training; cùng pipeline với huấn luyện từ SQLite.",
     }
     (model_dir / "pcbm_model_meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"

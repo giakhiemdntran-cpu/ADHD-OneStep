@@ -250,28 +250,39 @@ class DichVuPCBM:
             }
         }
 
-        features = xay_dung_dac_trung(events, decision)
-        recall_p = self._du_doan_xac_suat(self._mo_hinh_tu_nho, features)
-        completion_p = self._du_doan_xac_suat(self._mo_hinh_hoan_thanh, features)
+        # PCBM v4: mô hình recall dự đoán khả năng nhớ sau một generic cue.
+        # Vì vậy feature inference của recall luôn mô phỏng generic cue mức 1;
+        # mô hình completion vẫn dùng reminder hiện tại.
+        recall_decision = dict(decision)
+        recall_decision["data"] = dict(decision["data"])
+        recall_decision["data"]["reminder_type"] = "generic"
+        recall_decision["data"]["prompt_level"] = 1
+
+        recall_features = xay_dung_dac_trung(events, recall_decision)
+        completion_features = xay_dung_dac_trung(events, decision)
+        recall_p = self._du_doan_xac_suat(self._mo_hinh_tu_nho, recall_features)
+        completion_p = self._du_doan_xac_suat(self._mo_hinh_hoan_thanh, completion_features)
 
         recommended = int(base_prompt_level)
-        reason = "KEEP_BASE_LEVEL"
+        reason = "KEEP_BASE_LEVEL_ADVISORY_ONLY"
         if recall_p is not None:
             if recall_p >= 0.80 and recommended > 0:
                 recommended -= 1
-                reason = "HIGH_RECALL_PROBABILITY_FADE_ONE_LEVEL"
+                reason = "HIGH_RECALL_PROBABILITY_SUGGEST_FADE_ONE_LEVEL"
             elif recall_p < 0.45 and recommended < 2:
                 recommended += 1
-                reason = "LOW_RECALL_PROBABILITY_INCREASE_SUPPORT"
+                reason = "LOW_RECALL_PROBABILITY_SUGGEST_MORE_SUPPORT"
 
         output = {
             "recall_probability": recall_p,
             "completion_30m_probability": completion_p,
             "base_prompt_level": int(base_prompt_level),
             "recommended_prompt_level": int(recommended),
-            "applied": bool(self.ap_dung_muc_nhac and recommended != int(base_prompt_level)),
+            # v4 giữ advisory-only: không tự động giảm/tăng mức hỗ trợ.
+            "applied": False,
             "reason_code": reason,
-            "model_note": "Demo baseline trained from sample input; use live logs for personal retraining.",
+            "training_version": "PCBM",
+            "model_note": "PCBM advisory-only; recall = response after generic cue.",
         }
 
         with lay_ket_noi_csdl() as c:
@@ -285,7 +296,7 @@ class DichVuPCBM:
                     str(current_task.get("task_id") or ""),
                     occ,
                     "REMINDER_SENT",
-                    json.dumps(features, ensure_ascii=False, default=str),
+                    json.dumps({"recall": recall_features, "completion": completion_features}, ensure_ascii=False, default=str),
                     json.dumps(output, ensure_ascii=False),
                     decision_time.isoformat(timespec="seconds"),
                 )
@@ -297,7 +308,7 @@ class DichVuPCBM:
         from huan_luyen_pcbm.huan_luyen_mo_hinh import chay_chuong_trinh as _unused  # kiểm tra lại kết quả nhập dữ liệu
         import subprocess, sys
         cmd = [
-            sys.executable, "-m", "pcbm_training.train_models",
+            sys.executable, "-m", "huan_luyen_pcbm.huan_luyen_mo_hinh",
             "--input", str(PCBM_SAMPLE_DATA),
             "--model-dir", str(Path(PCBM_RECALL_MODEL).parent),
         ]
@@ -329,8 +340,9 @@ class DichVuPCBM:
                 """INSERT INTO pcbm_training_runs(
                     source, event_count, record_count, user_count,
                     recall_rows, completion_rows, metrics_json,
-                    recall_model_path, completion_model_path, created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    recall_model_path, completion_model_path, created_at,
+                    training_version, dataset_name
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     meta["source"], meta["events"], meta["records"], meta["users"],
                     meta["recall_model"]["training_rows"],
@@ -339,6 +351,8 @@ class DichVuPCBM:
                     meta["recall_model"]["path"],
                     meta["completion_model"]["path"],
                     meta["trained_at"],
+                    meta.get("training_version", "PCBM"),
+                    "sample_events_4133.jsonl" if meta.get("events") == 4133 else "sqlite:pcbm_events",
                 )
             )
             run_id = cur.lastrowid

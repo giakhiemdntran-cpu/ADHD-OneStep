@@ -7,7 +7,7 @@ audio_lock = threading.RLock()
 
 # Khoảng chờ ngắn giúp ALSA/PortAudio giải phóng thiết bị ổn định hơn trên Jetson.
 INPUT_RELEASE_DELAY = 0.30
-OUTPUT_RELEASE_DELAY = 0.35
+OUTPUT_RELEASE_DELAY = 0.18
 
 
 def sau_dau_vao_giai_phong():

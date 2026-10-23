@@ -167,10 +167,10 @@ def tao_ung_dung_web():
 
     @app.get("/api/coaching/events")
     def lay_su_kien_huan_luyen():
-        from dich_vu.co_so_du_lieu import lay_ket_noi_csdl
-        with lay_ket_noi_csdl() as c:
-            rows = c.execute("SELECT * FROM coaching_events ORDER BY id DESC LIMIT 100").fetchall()
-        return jsonify({"success": True, "events": [dict(x) for x in rows]})
+        return jsonify({
+            "success": True,
+            "events": dich_vu_huan_luyen.lay_su_kien_huan_luyen(int(request.args.get("limit", 100))),
+        })
 
     @app.get("/api/coaching/config")
     def lay_cau_hinh_huan_luyen():

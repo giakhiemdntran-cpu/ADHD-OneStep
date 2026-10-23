@@ -11,6 +11,7 @@ import requests
 import streamlit as st
 
 from cau_hinh import DB_PATH, OLLAMA_MODEL, OLLAMA_URL, APP_TIMEZONE
+from quan_tri_huan_luyen_pcbm import hien_thi_quan_tri_huan_luyen_pcbm
 
 API_BASE = os.getenv("ONESTEP_API_URL", "http://127.0.0.1:5000").rstrip("/")
 ADMIN_PASSWORD = os.getenv("ONESTEP_ADMIN_PASSWORD", "")
@@ -213,6 +214,7 @@ page = st.sidebar.radio(
         "🧠 Huấn luyện ghi nhớ",
         "👁️ Bộ nhớ đồ vật",
         "🤖 AI nhận thức cá nhân",
+        "🧪 Quản trị huấn luyện PCBM",
         "🔌 Kiểm thử API",
         "🗄️ Kho dữ liệu",
         "⚙️ Hệ thống",
@@ -537,12 +539,12 @@ elif page == "🤖 AI nhận thức cá nhân":
         d3.metric("Tổng người dùng trong dữ liệu", f"{total_users:,}")
         st.caption("Bộ dữ liệu thử nghiệm đi qua cùng quy trình tạo đặc trưng, tạo nhãn và huấn luyện như dữ liệu hành vi thực tế.")
 
-        sample_4133 = Path(__file__).resolve().parent / "data" / "sample_events_4133.jsonl"
-        if sample_4133.exists():
-            with st.expander("Nạp lại bộ dữ liệu thử nghiệm 4.133 sự kiện"):
+        sample_large = Path(__file__).resolve().parent / "data" / "sample_events_v4_1_large.jsonl"
+        if sample_large.exists():
+            with st.expander("Nạp lại bộ dữ liệu PCBM large (16.693 sự kiện)"):
                 st.warning("Thao tác này chỉ xóa các sự kiện có mã người dùng bắt đầu bằng test_ rồi nạp lại bộ dữ liệu thử nghiệm; dữ liệu người dùng thật không bị xóa.")
-                if st.button("📥 Nạp lại 4.133 sự kiện thử nghiệm", use_container_width=True):
-                    cmd = [sys.executable, str(Path(__file__).resolve().parent / "tools" / "import_pcbm_4133.py"), "--file", str(sample_4133), "--reset"]
+                if st.button("📥 Nạp lại 16.693 sự kiện thử nghiệm", use_container_width=True):
+                    cmd = [sys.executable, str(Path(__file__).resolve().parent / "cong_cu" / "nhap_du_lieu_pcbm_large.py"), "--file", str(sample_large), "--reset"]
                     with st.spinner("Đang nạp dữ liệu thử nghiệm vào SQLite..."):
                         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                     if proc.returncode == 0:
@@ -554,8 +556,9 @@ elif page == "🤖 AI nhận thức cá nhân":
 
         st.subheader("Huấn luyện từ lịch sử hành vi")
         st.info(
-            "Hệ thống sử dụng trực tiếp nhật ký hành vi trong cơ sở dữ liệu, tạo đặc trưng và nhãn, "
-            "đánh giá theo thứ tự thời gian rồi lưu hai mô hình để OneStep sử dụng ngay sau khi huấn luyện."
+            "PCBM sử dụng trực tiếp nhật ký hành vi trong SQLite; nhãn recall chỉ lấy sau generic cue, "
+            "bổ sung đặc trưng recall 1/3/7 ngày, streak và same-task; sau đó đánh giá walk-forward, "
+            "so sánh nhiều mô hình và lưu mô hình tốt nhất theo PR-AUC."
         )
 
         if st.button("🧠 Huấn luyện mô hình cá nhân từ dữ liệu SQLite", type="primary", use_container_width=True):
@@ -580,20 +583,21 @@ elif page == "🤖 AI nhận thức cá nhân":
                 ev = (item or {}).get("evaluation") or {}
                 x1, x2, x3, x4 = st.columns(4)
                 x1.metric("Bản ghi huấn luyện", (item or {}).get("training_rows", 0))
-                x2.metric("Tỷ lệ kết quả dương", f"{100*(item or {}).get('positive_rate', 0):.1f}%")
-                x3.metric("Độ chính xác", f"{100*ev.get('accuracy', 0):.1f}%" if ev.get("available") else "N/A")
-                x4.metric("Độ nhạy", f"{100*ev.get('recall', 0):.1f}%" if ev.get("available") else "N/A")
+                x2.metric("Mô hình chọn", (item or {}).get("model_name") or ev.get("selected_model") or "N/A")
+                x3.metric("PR-AUC", f"{ev.get('pr_auc'):.3f}" if ev.get("available") and ev.get("pr_auc") is not None else "N/A")
+                x4.metric("F1", f"{ev.get('f1'):.3f}" if ev.get("available") and ev.get("f1") is not None else "N/A")
                 if ev.get("available"):
                     st.caption(
-                        f"Tách theo thời gian: {ev.get('train_rows', 0)} train / {ev.get('test_rows', 0)} test · "
+                        f"Walk-forward {ev.get('n_splits', 0)} folds · "
                         f"ROC-AUC: {ev.get('roc_auc') if ev.get('roc_auc') is not None else 'N/A'} · "
-                        f"Ma trận nhầm lẫn: {ev.get('confusion_matrix')}"
+                        f"Accuracy: {ev.get('accuracy', 0):.3f} · Recall: {ev.get('recall', 0):.3f} · "
+                        f"Brier: {ev.get('brier_score', 0):.3f} · ECE: {ev.get('ece_10bin', 0):.3f}"
                     )
                 else:
                     st.warning(ev.get("reason", "Chưa đủ dữ liệu để đánh giá."))
 
-            show_model_result("Mô hình dự đoán khả năng tự nhớ", train_result.get("recall_model"))
-            show_model_result("Mô hình dự đoán hoàn thành trong 30 phút", train_result.get("completion_model"))
+            hien_thi_mo_hinh_ket_qua("Mô hình dự đoán khả năng tự nhớ", train_result.get("recall_model"))
+            hien_thi_mo_hinh_ket_qua("Mô hình dự đoán hoàn thành trong 30 phút", train_result.get("completion_model"))
 
             st.markdown("**Tệp mô hình đã lưu**")
             st.json(train_result.get("saved_models", {}))
@@ -645,6 +649,10 @@ elif page == "🤖 AI nhận thức cá nhân":
             st.caption("Chưa có dự đoán.")
     except Exception as e:
         st.error(f"Không đọc được PCBM API: {e}")
+
+
+elif page == "🧪 Quản trị huấn luyện PCBM":
+    hien_thi_quan_tri_huan_luyen_pcbm()
 
 
 elif page == "🔌 Kiểm thử API":

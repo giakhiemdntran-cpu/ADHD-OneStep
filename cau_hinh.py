@@ -13,6 +13,7 @@ REMINDER_CHECK_MS = 2000
 
 # Giọng nói / VAD thích nghi
 AUTO_LISTEN = True
+# Sample rate mục tiêu cho STT. Microphone được mở ở native sample rate rồi resample về giá trị này.
 VOICE_SAMPLE_RATE = 16000
 VOICE_BLOCK_SIZE = 1024
 VOICE_START_TIMEOUT = 12.0
@@ -35,6 +36,21 @@ OLLAMA_TIMEOUT = 90
 APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Ho_Chi_Minh")
 
 # TTS - tổng hợp giọng nói
+# Engine chính: VieNeu-TTS v3 Turbo streaming.
+TTS_ENGINE = os.getenv("TTS_ENGINE", "vieneu").strip().lower()
+
+# VieNeu v3 Turbo: PCM float32 native 48 kHz.
+VIENEU_VOICE = os.getenv("VIENEU_VOICE", "Mai Anh")
+VIENEU_BACKEND = os.getenv("VIENEU_BACKEND", "auto").strip().lower()
+VIENEU_SAMPLE_RATE = 48000
+VIENEU_START_BUFFER_MS = int(os.getenv("VIENEU_START_BUFFER_MS", "120"))
+VIENEU_FIRST_AUDIO_TIMEOUT = float(os.getenv("VIENEU_FIRST_AUDIO_TIMEOUT", "2.0"))
+VIENEU_STREAM_STALL_TIMEOUT = float(os.getenv("VIENEU_STREAM_STALL_TIMEOUT", "1.5"))
+VIENEU_PRELOAD = os.getenv("VIENEU_PRELOAD", "1").lower() in {"1", "true", "yes", "on"}
+
+# Fallback khi VieNeu lỗi trước khi phát được audio đầu tiên.
+TTS_EDGE_FALLBACK = os.getenv("TTS_EDGE_FALLBACK", "1").lower() in {"1", "true", "yes", "on"}
+TTS_PYTTSX3_FALLBACK = os.getenv("TTS_PYTTSX3_FALLBACK", "1").lower() in {"1", "true", "yes", "on"}
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "vi-VN-HoaiMyNeural")
 EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "-5%")
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Import bộ 4.133 sự kiện PCBM vào OneStep v9.9.
+Import bộ dữ liệu PCBM v4.1 large vào OneStep v9.9.
 
 Mặc định:
-- Đọc file: data/sample_events.jsonl
+- Đọc file: data/sample_events_v4_1_large.jsonl
 - Ghi vào bảng: pcbm_events
 - user_id được thêm tiền tố "test_" để không lẫn dữ liệu thật
 - Có thể reset riêng dữ liệu test trước khi import
@@ -37,11 +37,11 @@ TEST_PREFIX = "test_"
 
 def phan_tich_tham_so():
     p = argparse.ArgumentParser(
-        description="Import 4.133 PCBM sample events vào OneStep v9.9"
+        description="Import PCBM v4.1 large sample events vào OneStep v9.9"
     )
     p.add_argument(
         "--file",
-        default=str(ROOT / "data" / "sample_events.jsonl"),
+        default=str(ROOT / "data" / "sample_events_v4_1_large.jsonl"),
         help="Đường dẫn JSONL cần import",
     )
     p.add_argument(
@@ -70,7 +70,7 @@ def phan_tich_tham_so():
         action="store_true",
         help="Chỉ kiểm tra file, không ghi DB",
     )
-    return p.phan_tich_tham_so()
+    return p.parse_args()
 
 
 def tai_su_kien(path: Path):

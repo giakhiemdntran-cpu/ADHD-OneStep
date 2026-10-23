@@ -6,9 +6,9 @@ import pandas as pd
 from huan_luyen_pcbm.xay_dung_dac_trung import xay_dung_dac_trung
 from huan_luyen_pcbm.xay_dung_nhan import xay_dung_nhan
 
-PIPELINE_VERSION = "pcbm-labeler-0.1"
-FEATURE_SCHEMA_VERSION = "1.0"
-LABEL_SCHEMA_VERSION = "1.0"
+PIPELINE_VERSION = "pcbm-training-v4"
+FEATURE_SCHEMA_VERSION = "4.0"
+LABEL_SCHEMA_VERSION = "4.0"
 
 def tai_du_lieu_jsonl(path):
     events = []
@@ -25,19 +25,30 @@ def tai_du_lieu_jsonl(path):
     return events
 
 def xay_dung_ban_ghi_hoc(events):
-    # Điểm bắt đầu: REMINDER_SENT được xem là thời điểm ra quyết định.
-    decisions = [e for e in events if e["event_type"] == "REMINDER_SENT"]
+    """Tạo training records theo từng user để chạy tốt với bộ dữ liệu lớn.
+
+    Feature/label của PCBM chỉ phụ thuộc lịch sử của chính user_id. Vì vậy việc
+    chia events theo user trước khi tính giúp giảm mạnh chi phí quét dữ liệu mà
+    vẫn giữ nguyên ranh giới thời gian và kết quả nhãn/đặc trưng.
+    """
+    events_by_user = {}
+    for e in events:
+        events_by_user.setdefault(e["user_id"], []).append(e)
 
     rows = []
-    for d in decisions:
-        row = {}
-        row.update(xay_dung_dac_trung(events, d))
-        row.update(xay_dung_nhan(events, d))
-        row["feature_schema_version"] = FEATURE_SCHEMA_VERSION
-        row["label_schema_version"] = LABEL_SCHEMA_VERSION
-        row["pipeline_version"] = PIPELINE_VERSION
-        rows.append(row)
+    for user_id, user_events in events_by_user.items():
+        user_events.sort(key=lambda x: (x["timestamp"], x["event_id"]))
+        decisions = [e for e in user_events if e["event_type"] == "REMINDER_SENT"]
+        for d in decisions:
+            row = {}
+            row.update(xay_dung_dac_trung(user_events, d))
+            row.update(xay_dung_nhan(user_events, d))
+            row["feature_schema_version"] = FEATURE_SCHEMA_VERSION
+            row["label_schema_version"] = LABEL_SCHEMA_VERSION
+            row["pipeline_version"] = PIPELINE_VERSION
+            rows.append(row)
 
+    rows.sort(key=lambda r: (r["decision_time"], r["user_id"], r["occurrence_id"]))
     return pd.DataFrame(rows)
 
 def chay_chuong_trinh():
