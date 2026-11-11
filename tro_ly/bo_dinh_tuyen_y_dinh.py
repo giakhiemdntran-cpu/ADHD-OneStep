@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dich_vu.dich_vu_huan_luyen import thoi_quen_khoa_tu_tieu_de
+from dich_vu.dieu_phoi_pcbm import DieuPhoiPCBM
 from cau_hinh import VISION_SNAPSHOT_SECONDS, VISION_SNAPSHOT_LONG_SECONDS
 
 DEFAULT_SCHOOL_ITEMS = ["backpack", "book", "bottle"]
@@ -14,6 +15,7 @@ class BoDinhTuyenYDinh:
         self.dich_vu_huan_luyen = dich_vu_huan_luyen
         self.dich_vu_thi_giac = dich_vu_thi_giac
         self.dich_vu_pcbm = dich_vu_pcbm
+        self.dieu_phoi_pcbm = DieuPhoiPCBM(dich_vu_pcbm, dich_vu_nhiem_vu) if dich_vu_pcbm else None
 
     def _ngu_canh(self):
         t = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
@@ -64,6 +66,13 @@ class BoDinhTuyenYDinh:
             return {"reply": "Mình chưa nghe rõ. Bạn nói lại nhé.", "state": "error"}
 
         low = raw.lower()
+
+        # PCBM Coach commands are handled deterministically before the general LLM.
+        # This keeps model numbers/reasons grounded in the actual PCBM pipeline.
+        if self.dieu_phoi_pcbm:
+            pcbm_reply = self.dieu_phoi_pcbm.xu_ly_lenh(raw)
+            if pcbm_reply is not None:
+                return pcbm_reply
 
         # Các lệnh thị giác rõ ràng được xử lý nhanh, không phụ thuộc bộ phân tích 1.5B.
         if self.dich_vu_thi_giac:
@@ -153,6 +162,8 @@ class BoDinhTuyenYDinh:
                         "schedule_type": task.get("schedule_type"),
                     }
                 )
+            if self.dieu_phoi_pcbm:
+                self.dieu_phoi_pcbm.khi_tao_nhiem_vu(task)
             if deadline and recommended:
                 reply = f"Mình đã ghi việc {title}. Để kịp giờ, mình đề xuất bắt đầu lúc {scheduled_at.replace('T',' ')}."
             elif len(steps) > 1:
@@ -160,6 +171,16 @@ class BoDinhTuyenYDinh:
             else:
                 when = (task.get("scheduled_at") or task.get("scheduled_time") or "").replace("T", " ")
                 reply = f"Đã ghi việc {task['title']}. Mình sẽ theo dõi từ {when}."
+            if self.dieu_phoi_pcbm:
+                try:
+                    a = self.dieu_phoi_pcbm.danh_gia(title, est or recommended or 30)
+                    pp = a.get("prediction") or {}
+                    cur_level = self.dieu_phoi_pcbm.lay_muc_ho_tro()
+                    rec_level = int(pp.get("recommended_prompt_level", cur_level))
+                    recall_txt = self.dieu_phoi_pcbm._pct(pp.get("recall_percent"))
+                    reply += f" PCBM dự đoán khả năng tự nhớ khoảng {recall_txt} và đề xuất Level {cur_level} → Level {rec_level}."
+                except Exception as e:
+                    print("[PCBM CREATE REPLY WARN]", e)
             return {"reply": reply, "state": "success", "refresh": True}
 
         if intent == "start_task" and conf >= 0.45:
@@ -169,8 +190,11 @@ class BoDinhTuyenYDinh:
             cur = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
             if self.dich_vu_huan_luyen:
                 self.dich_vu_huan_luyen.ghi_nhat_ky("START", cur.get("task_id"), cur.get("occurrence_id"), cur.get("habit_key"), r)
-            # TASK_STARTED đã được ghi tập trung trong DichVuNhiemVu.bat_dau_lan_thuc_hien().
-            return {"reply": f"Bắt đầu nhé. Việc hiện tại là {cur['current_step']}.", "state": "success", "refresh": True}
+            if self.dich_vu_pcbm:
+                self.dich_vu_pcbm.ghi_su_kien("TASK_STARTED", cur.get("task_id"), cur.get("occurrence_id"), r)
+            if self.dieu_phoi_pcbm:
+                self.dieu_phoi_pcbm.khi_bat_dau(cur, r)
+            return {"reply": f"Bắt đầu nhé. Việc hiện tại là {cur['current_step']}. Buddy đã ghi nhận thời điểm em chủ động bắt đầu.", "state": "success", "refresh": True}
 
         if intent == "complete_task" and conf >= 0.55:
             result = self.dich_vu_nhiem_vu.hoan_thanh_hien_tai_buoc()
@@ -179,7 +203,9 @@ class BoDinhTuyenYDinh:
                     self.dich_vu_huan_luyen.khi_da_hoan_thanh(result)
                 if self.dich_vu_pcbm:
                     self.dich_vu_pcbm.ghi_su_kien("TASK_COMPLETED", result.get("task_id"), result.get("occurrence_id"), result)
-                return {"reply": result.get("message", "Đã hoàn thành."), "state": "success", "refresh": True}
+                if self.dieu_phoi_pcbm:
+                    self.dieu_phoi_pcbm.khi_hoan_thanh(result)
+                return {"reply": result.get("message", "Đã hoàn thành.") + " Kết quả này đã được ghi vào lịch sử hành vi cho PCBM.", "state": "success", "refresh": True}
             return {"reply": f"Tốt. Tiếp theo là {result['current_step']}.", "state": "success", "refresh": True}
 
         if intent == "snooze_task" and conf >= 0.55:

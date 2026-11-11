@@ -12,9 +12,8 @@ from PySide6.QtWidgets import (
 from cau_hinh import (
     FACE_DIR, AUTO_LISTEN, REMINDER_CHECK_MS,
     ADHD_MODE_ENABLED, COACHING_DEVICE_MODE,
-    DEFAULT_USER_ID,
 )
-from dich_vu.co_so_du_lieu import khoi_tao_co_so_du_lieu, lay_ket_noi_csdl
+from dich_vu.co_so_du_lieu import khoi_tao_co_so_du_lieu
 from dich_vu.dich_vu_nhiem_vu import DichVuNhiemVu
 from dich_vu.dich_vu_ai import DichVuAI
 from dich_vu.dich_vu_nhan_dang_giong_noi import DichVuNhanDangGiongNoi
@@ -35,6 +34,8 @@ class KenhTinHieu(QObject):
     doc_giong_noi_xong = Signal()
     ket_qua = Signal(object)
     muc_am_thanh = Signal(float, float)
+
+
 
 
 class ThanhMucAmThanh(QWidget):
@@ -103,16 +104,8 @@ class CuaSoTroLy(QWidget):
         self.dich_vu_doc_giong_noi = DichVuDocGiongNoi()
         self.dich_vu_vong_deo = DichVuVongDeo(self.dich_vu_nhiem_vu, self.dich_vu_huan_luyen)
         self.dich_vu_pcbm = DichVuPCBM()
-
-        # Người dùng hiện tại của robot.
-        self.active_user_id = str(
-            tai_cai_dat().get("active_user_id") or DEFAULT_USER_ID
-        ).strip() or DEFAULT_USER_ID
-
-        # Đồng bộ active user xuống các service.
-        self.dich_vu_pcbm.active_user_id = self.active_user_id
-        self.dich_vu_nhiem_vu.active_user_id = self.active_user_id
-
+        self.active_user_id = str(tai_cai_dat().get("active_user_id") or "test_U036").strip() or "test_U036"
+        self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(self.active_user_id)
         self.dich_vu_vong_deo.dam_bao_luoc_do()
         self.bo_dinh_tuyen = BoDinhTuyenYDinh(self.dich_vu_nhiem_vu, self.dich_vu_ai, self.dich_vu_huan_luyen, self.dich_vu_thi_giac, self.dich_vu_pcbm)
 
@@ -164,8 +157,8 @@ class CuaSoTroLy(QWidget):
             "QComboBox:hover{border-color:#2F7D6D;}"
             "QComboBox::drop-down{border:none;width:28px;}"
         )
-        user_ids = self.liet_ke_user_ids_pcbm()
-        for uid in [self.active_user_id, DEFAULT_USER_ID] + user_ids:
+        user_ids = [str(x.get("user_id")) for x in self.dich_vu_pcbm.liet_ke_nguoi_dung() if x.get("user_id")]
+        for uid in [self.active_user_id, "test_U036"] + user_ids:
             if uid and self.chon_nguoi_dung.findText(uid) < 0:
                 self.chon_nguoi_dung.addItem(uid)
         idx_user = self.chon_nguoi_dung.findText(self.active_user_id)
@@ -429,35 +422,12 @@ class CuaSoTroLy(QWidget):
         if AUTO_LISTEN:
             QTimer.singleShot(900, self.lang_nghe)
 
-    def liet_ke_user_ids_pcbm(self):
-        """Lấy danh sách user_id hiện có trong pcbm_events để đổ vào ComboBox."""
-        try:
-            with lay_ket_noi_csdl() as c:
-                rows = c.execute(
-                    """
-                    SELECT user_id, COUNT(*) AS total_events
-                    FROM pcbm_events
-                    WHERE user_id IS NOT NULL
-                      AND TRIM(user_id) <> ''
-                    GROUP BY user_id
-                    ORDER BY total_events DESC, user_id ASC
-                    """
-                ).fetchall()
-            return [str(r["user_id"]) for r in rows if r["user_id"]]
-        except Exception as e:
-            print("[PCBM USER LIST ERROR]", e)
-            return []
-
     def doi_nguoi_dung_hien_tai(self, user_id):
         user_id = str(user_id or "").strip()
         if not user_id:
             return
         self.active_user_id = user_id
-
-        # Đồng bộ user hiện tại xuống các service.
-        self.dich_vu_pcbm.active_user_id = user_id
-        self.dich_vu_nhiem_vu.active_user_id = user_id
-
+        self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(user_id)
         settings = tai_cai_dat()
         settings["active_user_id"] = user_id
         luu_cai_dat(settings)
@@ -474,42 +444,41 @@ class CuaSoTroLy(QWidget):
             return "—"
 
     def lam_moi_trang_thai_nguoi_dung(self):
-        """Hiển thị user hiện tại + khuyến nghị PCBM từ luồng thật."""
+        """Hiển thị user hiện tại + mức hỗ trợ PCBM mà không ghi dữ liệu test vào DB."""
         if not hasattr(self, "nhan_muc_ho_tro"):
             return
-
-        uid = getattr(self, "active_user_id", DEFAULT_USER_ID)
-
+        uid = getattr(self, "active_user_id", "test_U036")
         try:
             t = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
+            if not t.get("done"):
+                title = t.get("task_name") or "Nhiệm vụ hiện tại"
+                try:
+                    base_level = int(self.bo_dinh_tuyen.dieu_phoi_pcbm.lay_muc_ho_tro(self.active_user_id))
+                except Exception:
+                    base_level = 1
+                estimated = int(t.get("estimated_minutes") or 30)
+            else:
+                title = "Nhiệm vụ học tập"
+                try:
+                    base_level = int(self.bo_dinh_tuyen.dieu_phoi_pcbm.lay_muc_ho_tro(self.active_user_id))
+                except Exception:
+                    base_level = 1
+                estimated = 30
 
-            if t.get("done"):
-                self.nhan_muc_ho_tro.setText(
-                    f"👤 {uid}  •  Chưa có nhiệm vụ hiện tại để PCBM đánh giá"
-                )
-                if hasattr(self, "nhan_chat_muc_ho_tro"):
-                    self.nhan_chat_muc_ho_tro.setText(f"👤 {uid}  •  PCBM chờ nhiệm vụ")
-                return
+            # User mô phỏng được neo theo lịch sử gần nhất để số liệu demo vẫn có ý nghĩa.
+            decision_time = None
+            if uid.startswith("test_") or uid.startswith("U"):
+                decision_time = self.dich_vu_pcbm.thoi_diem_demo_theo_lich_su([uid])
 
-            try:
-                base_level = int(self.dich_vu_huan_luyen.lay_muc_nhac(t))
-            except Exception:
-                base_level = 1
-
-            # Dùng đúng API PCBM hiện có; không gọi các hàm demo chưa được khai báo.
-            pred = self.dich_vu_pcbm.de_xuat_muc_ho_tro(
-                t,
-                base_level,
-                uid
-            ) or {}
-
+            result = self.dich_vu_pcbm.thu_nghiem_kich_ban(
+                uid, title, base_level, estimated, 1, "buddy", decision_time
+            )
+            pred = result.get("prediction") or {}
+            profile = result.get("profile") or {}
             rec = int(pred.get("recommended_prompt_level", base_level))
-
-            recall_p = pred.get("recall_probability")
-            completion_p = pred.get("completion_30m_probability")
-
-            recall = "—" if recall_p is None else f"{float(recall_p) * 100:.1f}%"
-            completion = "—" if completion_p is None else f"{float(completion_p) * 100:.1f}%"
+            recall = self._fmt_pct(pred.get("recall_percent"))
+            completion = self._fmt_pct(pred.get("completion_30m_percent"))
+            cold = " • Cold-start" if profile.get("cold_start") else ""
 
             if rec < base_level:
                 huong = "↓ giảm hỗ trợ"
@@ -521,34 +490,25 @@ class CuaSoTroLy(QWidget):
                 huong = "= giữ mức"
                 bg, border, fg = "#EEF5FB", "#BDD4E8", "#315E7D"
 
-            text = (
-                f"👤 {uid}   •   Hỗ trợ hiện tại: Level {base_level}   →   "
-                f"PCBM đề xuất: Level {rec} ({huong})   •   "
-                f"Recall {recall}   •   Completion≤30m {completion}"
-            )
-
+            text = (f"👤 {uid}   •   Hỗ trợ hiện tại: Level {base_level}   →   "
+                    f"PCBM đề xuất: Level {rec} ({huong})   •   "
+                    f"Recall {recall}   •   Completion≤30m {completion}{cold}")
             self.nhan_muc_ho_tro.setText(text)
-            self.nhan_muc_ho_tro.setToolTip(pred.get("reason_code") or "")
+            self.nhan_muc_ho_tro.setToolTip(pred.get("reason_vi") or "")
             self.nhan_muc_ho_tro.setStyleSheet(
                 f"QLabel{{background:{bg};border:1px solid {border};border-radius:14px;"
                 f"font:600 17px Arial;padding:10px 18px;margin:0 60px 14px;color:{fg};}}"
             )
-
             if hasattr(self, "nhan_chat_muc_ho_tro"):
                 self.nhan_chat_muc_ho_tro.setText(
                     f"👤 {uid}  •  L{base_level}→L{rec}  •  Recall {recall}"
                 )
-                self.nhan_chat_muc_ho_tro.setToolTip(pred.get("reason_code") or "")
-
+                self.nhan_chat_muc_ho_tro.setToolTip(pred.get("reason_vi") or "")
         except Exception as e:
             print("[PCBM USER STATUS ERROR]", e)
-            self.nhan_muc_ho_tro.setText(
-                f"👤 {uid}  •  Chưa đủ dữ liệu để hiển thị mức hỗ trợ"
-            )
+            self.nhan_muc_ho_tro.setText(f"👤 {uid}  •  Chưa đủ dữ liệu để hiển thị mức hỗ trợ")
             if hasattr(self, "nhan_chat_muc_ho_tro"):
-                self.nhan_chat_muc_ho_tro.setText(
-                    f"👤 {uid}  •  PCBM chưa sẵn sàng"
-                )
+                self.nhan_chat_muc_ho_tro.setText(f"👤 {uid}  •  PCBM chưa sẵn sàng")
 
     def mo_cai_dat(self):
         """Mở Settings. Thiết bị/buffer áp dụng từ lượt tiếp theo."""
@@ -854,7 +814,12 @@ class CuaSoTroLy(QWidget):
                 self.noi(f"Đến giờ {t['task_name']} rồi.", "idle")
             return
 
-        base_level = self.dich_vu_huan_luyen.lay_muc_nhac(t)
+        # Mức hỗ trợ hiện tại được lưu riêng theo user bởi lớp điều phối PCBM.
+        # PCBM chỉ đề xuất; level này chỉ đổi khi người dùng chấp nhận.
+        try:
+            base_level = int(self.bo_dinh_tuyen.dieu_phoi_pcbm.lay_muc_ho_tro(self.active_user_id))
+        except Exception:
+            base_level = self.dich_vu_huan_luyen.lay_muc_nhac(t)
 
         # PCBM dự đoán xác suất tự nhớ / hoàn thành từ lịch sử sự kiện cá nhân.
         # Mặc định PCBM chỉ đưa khuyến nghị. Đặt PCBM_APPLY_PROMPT_LEVEL=1 để cho phép
@@ -877,7 +842,6 @@ class CuaSoTroLy(QWidget):
                 "reminder_type": "generic" if level <= 1 else "explicit",
                 "channel": "buddy",
             },
-            user_id=self.active_user_id,
         )
 
         if level == 0:

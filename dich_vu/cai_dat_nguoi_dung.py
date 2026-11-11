@@ -45,7 +45,13 @@ DEFAULT_HELP_PROMPTS = {
         "Giúp mình bắt đầu việc này từng bước một.",
         "Mình đang bị mất tập trung, hãy giúp mình quay lại việc đang làm.",
         "Cho mình biết tiến độ luyện thói quen gần đây.",
-        "Mức hỗ trợ hiện tại của mình là bao nhiêu?",
+        "Mức hỗ trợ hiện tại của em là bao nhiêu?",
+        "Tại sao Buddy lại đề xuất mức hỗ trợ này?",
+        "Được, Buddy có thể nhắc ít hơn.",
+        "Mức nhắc này vừa đủ.",
+        "Nhắc nhiều quá.",
+        "Em cần nhắc rõ hơn.",
+        "Lần này Buddy đánh giá thế nào?",
     ],
     "Camera – kiểm tra vật dụng": [
         "Kiểm tra giúp mình đã có đủ đồ dùng học tập chưa.",
@@ -72,6 +78,7 @@ DEFAULT_HELP_PROMPTS = {
 
 DEFAULTS = {
     "active_user_id": "test_U036",
+    "pcbm_support_levels": {"test_U036": 1},
     "audio_input_device": None,
     "audio_output_device": None,
     "camera_source": VISION_CAMERA_SOURCE,
@@ -126,6 +133,21 @@ def _sanitize(data):
 
     result["vieneu_voice"] = str(result.get("vieneu_voice") or VIENEU_VOICE).strip() or VIENEU_VOICE
     result["active_user_id"] = str(result.get("active_user_id") or "test_U036").strip() or "test_U036"
+
+    raw_levels = result.get("pcbm_support_levels")
+    clean_levels = {}
+    if isinstance(raw_levels, dict):
+        for uid, level in raw_levels.items():
+            uid = str(uid).strip()
+            if not uid:
+                continue
+            try:
+                clean_levels[uid] = max(0, min(2, int(level)))
+            except (TypeError, ValueError):
+                clean_levels[uid] = 1
+    if "test_U036" not in clean_levels:
+        clean_levels["test_U036"] = 1
+    result["pcbm_support_levels"] = clean_levels
 
     raw_prompts = result.get("help_prompts")
     prompts = {}
