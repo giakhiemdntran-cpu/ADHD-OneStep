@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
 from cau_hinh import (
     FACE_DIR, AUTO_LISTEN, REMINDER_CHECK_MS,
     ADHD_MODE_ENABLED, COACHING_DEVICE_MODE,
-    DEFAULT_USER_ID,
 )
 from dich_vu.co_so_du_lieu import khoi_tao_co_so_du_lieu
 from dich_vu.dich_vu_nhiem_vu import DichVuNhiemVu
@@ -105,25 +104,8 @@ class CuaSoTroLy(QWidget):
         self.dich_vu_doc_giong_noi = DichVuDocGiongNoi()
         self.dich_vu_vong_deo = DichVuVongDeo(self.dich_vu_nhiem_vu, self.dich_vu_huan_luyen)
         self.dich_vu_pcbm = DichVuPCBM()
-        self.active_user_id = str(
-            tai_cai_dat().get("active_user_id") or DEFAULT_USER_ID
-        ).strip() or DEFAULT_USER_ID
-
-        # Đồng bộ active user cho các service ngay khi khởi động.
-        try:
-            self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(self.active_user_id)
-        except Exception:
-            self.dich_vu_pcbm.active_user_id = self.active_user_id
-
-        self.dich_vu_nhiem_vu.active_user_id = self.active_user_id
-        if hasattr(self.dich_vu_nhiem_vu, "pcbm"):
-            try:
-                self.dich_vu_nhiem_vu.pcbm.dat_nguoi_dung_hien_tai(
-                    self.active_user_id
-                )
-            except Exception:
-                self.dich_vu_nhiem_vu.pcbm.active_user_id = self.active_user_id
-
+        self.active_user_id = str(tai_cai_dat().get("active_user_id") or "test_U036").strip() or "test_U036"
+        self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(self.active_user_id)
         self.dich_vu_vong_deo.dam_bao_luoc_do()
         self.bo_dinh_tuyen = BoDinhTuyenYDinh(self.dich_vu_nhiem_vu, self.dich_vu_ai, self.dich_vu_huan_luyen, self.dich_vu_thi_giac, self.dich_vu_pcbm)
 
@@ -150,7 +132,7 @@ class CuaSoTroLy(QWidget):
         self._phan_hoi_sau_anh_chup = ""
         self._trang_thai_sau_anh_chup = "idle"
 
-        self.setWindowTitle("OneStep Buddy v9.9 PCBM")
+        self.setWindowTitle("OneStep Buddy v10.6 PCBM")
         self.setCursor(Qt.BlankCursor)
         self.setStyleSheet("background:#F2F9F7;color:#20303A;")
 
@@ -160,71 +142,63 @@ class CuaSoTroLy(QWidget):
         root.setSpacing(6)
 
         top_bar = QHBoxLayout()
+        # Chừa khoảng an toàn cho viền màn hình robot:
+        # - lùi cụm Người dùng bên trái vào trong
+        # - lùi nút Thoát bên phải vào trong
+        # - hạ toàn bộ thanh nút xuống một chút để tránh bị cắt mép trên
+        top_bar.setContentsMargins(12, 8, 12, 2)
+        top_bar.setSpacing(6)
 
         nhan_user = QLabel("👤  Người dùng:")
-        nhan_user.setStyleSheet("font:600 17px Arial;color:#365A52;padding-left:4px;")
+        nhan_user.setStyleSheet("font:600 14px Arial;color:#365A52;padding-left:2px;")
         top_bar.addWidget(nhan_user)
 
         self.chon_nguoi_dung = QComboBox()
-        self.chon_nguoi_dung.setFixedHeight(44)
-        self.chon_nguoi_dung.setMinimumWidth(170)
+        self.chon_nguoi_dung.setEditable(False)
+        self.chon_nguoi_dung.setInsertPolicy(QComboBox.NoInsert)
+        self.chon_nguoi_dung.setFixedHeight(36)
+        self.chon_nguoi_dung.setMinimumWidth(150)
         self.chon_nguoi_dung.setToolTip("Chọn người dùng hiện tại cho Robot Buddy")
         self.chon_nguoi_dung.setStyleSheet(
             "QComboBox{background:#FFFFFF;border:1px solid #AFCFC7;border-radius:14px;"
-            "padding:7px 12px;font:700 17px Arial;color:#23463E;}"
+            "padding:5px 10px;font:700 14px Arial;color:#23463E;}"
             "QComboBox:hover{border-color:#2F7D6D;}"
             "QComboBox::drop-down{border:none;width:28px;}"
         )
-        try:
-            user_ids = [
-                str(x.get("user_id"))
-                for x in self.dich_vu_pcbm.liet_ke_nguoi_dung()
-                if x.get("user_id")
-            ]
-        except Exception as e:
-            print("[LOAD USER LIST ERROR]", e)
-            user_ids = []
-
-        for uid in [self.active_user_id, DEFAULT_USER_ID] + user_ids:
-            uid = str(uid or "").strip()
+        user_ids = [str(x.get("user_id")) for x in self.dich_vu_pcbm.liet_ke_nguoi_dung() if x.get("user_id")]
+        for uid in [self.active_user_id, "test_U036"] + user_ids:
             if uid and self.chon_nguoi_dung.findText(uid) < 0:
                 self.chon_nguoi_dung.addItem(uid)
-
         idx_user = self.chon_nguoi_dung.findText(self.active_user_id)
         self.chon_nguoi_dung.setCurrentIndex(idx_user if idx_user >= 0 else 0)
-
-        # Connect sau khi populate để tránh phát signal khi đang khởi tạo.
-        self.chon_nguoi_dung.currentTextChanged.connect(
-            self.doi_nguoi_dung_hien_tai
-        )
         top_bar.addWidget(self.chon_nguoi_dung)
 
-        # Nút refresh thủ công: hữu ích khi demo / đổi user.
-        self.nut_refresh_user = QPushButton("↻ Refresh")
-        self.nut_refresh_user.setCursor(Qt.PointingHandCursor)
-        self.nut_refresh_user.setFixedHeight(44)
-        self.nut_refresh_user.setMinimumWidth(100)
-        self.nut_refresh_user.setToolTip(
-            "Tải lại dữ liệu PCBM và nhiệm vụ của người dùng hiện tại"
+        # Chỉ áp dụng user khi bấm nút Chọn.
+        # Không thay đổi kích thước / bố cục các nút còn lại của v10.6.
+        self.nut_xac_nhan_user = QPushButton("✓ Chọn")
+        self.nut_xac_nhan_user.setCursor(Qt.PointingHandCursor)
+        self.nut_xac_nhan_user.setFixedHeight(36)
+        self.nut_xac_nhan_user.setFixedWidth(78)
+        self.nut_xac_nhan_user.setToolTip(
+            "Xác nhận đổi sang người dùng đang chọn"
         )
-        self.nut_refresh_user.setStyleSheet(
-            "QPushButton{background:#FFFFFF;border:1px solid #AFCFC7;"
-            "border-radius:14px;padding:7px 12px;font:600 16px Arial;"
-            "color:#2F6F61;}"
-            "QPushButton:hover{background:#E6F3F0;border-color:#2F7D6D;}"
-            "QPushButton:pressed{background:#D8ECE7;}"
+        self.nut_xac_nhan_user.setStyleSheet(
+            "QPushButton{background:#2F6F61;border:1px solid #2F6F61;"
+            "border-radius:14px;padding:4px 8px;font:700 14px Arial;color:#FFFFFF;}"
+            "QPushButton:hover{background:#285E53;}"
+            "QPushButton:pressed{background:#214F46;}"
         )
-        self.nut_refresh_user.clicked.connect(self.refresh_active_user)
-        top_bar.addWidget(self.nut_refresh_user)
+        self.nut_xac_nhan_user.clicked.connect(self.xac_nhan_doi_nguoi_dung)
+        top_bar.addWidget(self.nut_xac_nhan_user)
 
         top_bar.addStretch(1)
         self.nut_chuyen_giao_dien = QPushButton("💬  Chat")
         self.nut_chuyen_giao_dien.setCursor(Qt.PointingHandCursor)
-        self.nut_chuyen_giao_dien.setFixedHeight(44)
-        self.nut_chuyen_giao_dien.setMinimumWidth(120)
+        self.nut_chuyen_giao_dien.setFixedHeight(36)
+        self.nut_chuyen_giao_dien.setMinimumWidth(98)
         self.nut_chuyen_giao_dien.setStyleSheet(
             "QPushButton{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:20px;"
-            "padding:7px 18px;font:600 18px Arial;color:#20303A;}"
+            "padding:5px 12px;font:600 14px Arial;color:#20303A;}"
             "QPushButton:hover{background:#E6F3F0;}"
             "QPushButton:pressed{background:#D8ECE7;}"
         )
@@ -235,12 +209,12 @@ class CuaSoTroLy(QWidget):
         # Nút Settings: thiết bị audio/camera + buffer VieNeu.
         self.nut_cai_dat = QPushButton("⚙  Cài đặt")
         self.nut_cai_dat.setCursor(Qt.PointingHandCursor)
-        self.nut_cai_dat.setFixedHeight(44)
-        self.nut_cai_dat.setMinimumWidth(122)
+        self.nut_cai_dat.setFixedHeight(36)
+        self.nut_cai_dat.setMinimumWidth(102)
         self.nut_cai_dat.setToolTip("Cài đặt thiết bị & TTS (F2)")
         self.nut_cai_dat.setStyleSheet(
             "QPushButton{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:20px;"
-            "padding:7px 18px;font:600 18px Arial;color:#20303A;}"
+            "padding:5px 12px;font:600 14px Arial;color:#20303A;}"
             "QPushButton:hover{background:#E6F3F0;}"
             "QPushButton:pressed{background:#D8ECE7;}"
         )
@@ -250,12 +224,12 @@ class CuaSoTroLy(QWidget):
         # Nút Trợ giúp: danh mục prompt mẫu theo từng tình huống.
         self.nut_tro_giup = QPushButton("❓  Trợ giúp")
         self.nut_tro_giup.setCursor(Qt.PointingHandCursor)
-        self.nut_tro_giup.setFixedHeight(44)
-        self.nut_tro_giup.setMinimumWidth(122)
+        self.nut_tro_giup.setFixedHeight(36)
+        self.nut_tro_giup.setMinimumWidth(102)
         self.nut_tro_giup.setToolTip("Xem câu nói mẫu với Buddy (F3)")
         self.nut_tro_giup.setStyleSheet(
             "QPushButton{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:20px;"
-            "padding:7px 18px;font:600 18px Arial;color:#20303A;}"
+            "padding:5px 12px;font:600 14px Arial;color:#20303A;}"
             "QPushButton:hover{background:#E6F3F0;}"
             "QPushButton:pressed{background:#D8ECE7;}"
         )
@@ -265,12 +239,12 @@ class CuaSoTroLy(QWidget):
         # Nút thoát luôn hiển thị ở góc phải, cạnh nút đổi giao diện.
         self.nut_thoat = QPushButton("⏻  Thoát")
         self.nut_thoat.setCursor(Qt.PointingHandCursor)
-        self.nut_thoat.setFixedHeight(44)
-        self.nut_thoat.setMinimumWidth(112)
+        self.nut_thoat.setFixedHeight(36)
+        self.nut_thoat.setMinimumWidth(88)
         self.nut_thoat.setToolTip("Tắt OneStep Buddy (Ctrl+Q)")
         self.nut_thoat.setStyleSheet(
             "QPushButton{background:#FFF4F2;border:1px solid #E9BBB3;border-radius:20px;"
-            "padding:7px 18px;font:600 18px Arial;color:#B33A2E;}"
+            "padding:5px 12px;font:600 14px Arial;color:#B33A2E;}"
             "QPushButton:hover{background:#FDE3DE;border-color:#DE8D82;}"
             "QPushButton:pressed{background:#F8D2CB;}"
         )
@@ -306,6 +280,16 @@ class CuaSoTroLy(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
+        # Thanh trạng thái PCBM đặt ở phía trên khuôn mặt để tránh bị che bởi viền dưới màn hình robot.
+        self.nhan_muc_ho_tro = QLabel("Đang tải trạng thái PCBM...")
+        self.nhan_muc_ho_tro.setAlignment(Qt.AlignCenter)
+        self.nhan_muc_ho_tro.setWordWrap(True)
+        self.nhan_muc_ho_tro.setStyleSheet(
+            "QLabel{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:14px;"
+            "font:600 14px Arial;padding:6px 12px;margin:4px 60px 6px;color:#315C52;}"
+        )
+        lay.addWidget(self.nhan_muc_ho_tro)
+
         self.nhan_khuon_mat = QLabel()
         self.nhan_khuon_mat.setAlignment(Qt.AlignCenter)
         # Quan trọng: không để kích thước pixmap làm QLabel/window tự nở dần.
@@ -328,14 +312,6 @@ class CuaSoTroLy(QWidget):
         self.nhan_nhiem_vu.setStyleSheet("font:18px Arial;padding:0 40px 8px;color:#567078;")
         lay.addWidget(self.nhan_nhiem_vu)
 
-        self.nhan_muc_ho_tro = QLabel("Đang tải trạng thái PCBM...")
-        self.nhan_muc_ho_tro.setAlignment(Qt.AlignCenter)
-        self.nhan_muc_ho_tro.setWordWrap(True)
-        self.nhan_muc_ho_tro.setStyleSheet(
-            "QLabel{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:14px;"
-            "font:600 17px Arial;padding:10px 18px;margin:0 60px 14px;color:#315C52;}"
-        )
-        lay.addWidget(self.nhan_muc_ho_tro)
         self.ngan_xep_giao_dien.addWidget(self.trang_khuon_mat)
 
         # -------- Trang lịch sử chat --------
@@ -473,84 +449,49 @@ class CuaSoTroLy(QWidget):
         if AUTO_LISTEN:
             QTimer.singleShot(900, self.lang_nghe)
 
+    def xac_nhan_doi_nguoi_dung(self):
+        """Chỉ đổi active user sau khi bấm nút ✓ Chọn."""
+        if not hasattr(self, "chon_nguoi_dung"):
+            return
+
+        user_id = str(self.chon_nguoi_dung.currentText() or "").strip()
+        if not user_id:
+            return
+
+        self.doi_nguoi_dung_hien_tai(user_id)
+
     def doi_nguoi_dung_hien_tai(self, user_id):
-        """Đổi active user, lưu cấu hình và tự động refresh giao diện."""
         user_id = str(user_id or "").strip()
         if not user_id:
             return
 
         self.active_user_id = user_id
 
-        # Lưu lựa chọn user.
+        # Đồng bộ PCBM chính.
         try:
-            settings = tai_cai_dat()
-            settings["active_user_id"] = user_id
-            luu_cai_dat(settings)
-        except Exception as e:
-            print("[ACTIVE USER SAVE ERROR]", e)
+            self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(user_id)
+        except Exception:
+            self.dich_vu_pcbm.active_user_id = user_id
 
-        print("[ACTIVE USER CHANGED]", user_id)
-
-        # Auto-refresh ngay sau khi đổi user.
-        self.refresh_active_user()
-
-    def refresh_active_user(self):
-        """Ép đồng bộ active user và tải lại dữ liệu đang hiển thị."""
-        user_id = str(
-            getattr(self, "active_user_id", DEFAULT_USER_ID) or DEFAULT_USER_ID
-        ).strip() or DEFAULT_USER_ID
-
-        self.active_user_id = user_id
-        print("[REFRESH ACTIVE USER]", user_id)
-
-        # 1. Đồng bộ PCBM chính.
-        if hasattr(self, "dich_vu_pcbm"):
-            try:
-                self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(user_id)
-            except Exception:
-                self.dich_vu_pcbm.active_user_id = user_id
-
-        # 2. Đồng bộ service nhiệm vụ và PCBM nội bộ của service.
-        if hasattr(self, "dich_vu_nhiem_vu"):
+        # Đồng bộ service nhiệm vụ nếu bản hiện tại có active_user_id / PCBM riêng.
+        try:
             self.dich_vu_nhiem_vu.active_user_id = user_id
-
             if hasattr(self.dich_vu_nhiem_vu, "pcbm"):
                 try:
                     self.dich_vu_nhiem_vu.pcbm.dat_nguoi_dung_hien_tai(user_id)
                 except Exception:
                     self.dich_vu_nhiem_vu.pcbm.active_user_id = user_id
-
-        # 3. Refresh trạng thái PCBM.
-        try:
-            self.lam_moi_trang_thai_nguoi_dung()
         except Exception as e:
-            print("[PCBM REFRESH ERROR]", e)
+            print("[TASK USER SYNC ERROR]", e)
 
-        # 4. Refresh nhiệm vụ đang hiển thị.
-        try:
-            self.lam_moi_nhiem_vu()
-        except Exception as e:
-            print("[TASK REFRESH ERROR]", e)
+        settings = tai_cai_dat()
+        settings["active_user_id"] = user_id
+        luu_cai_dat(settings)
 
-        # 5. Nếu sau này có hàm load lịch sử coaching theo user thì tự gọi.
-        for method_name in (
-            "lam_moi_lich_su_chat",
-            "tai_lich_su_chat",
-            "tai_lich_su_coaching",
-        ):
-            method = getattr(self, method_name, None)
-            if callable(method):
-                try:
-                    method()
-                except Exception as e:
-                    print(f"[{method_name.upper()} ERROR]", e)
-                break
+        print("[ACTIVE USER]", user_id)
 
-        # 6. Ép Qt cập nhật ngay, hữu ích khi demo.
-        try:
-            QApplication.processEvents()
-        except Exception:
-            pass
+        # Giữ nguyên cách refresh trạng thái của bản v10.6.
+        self.lam_moi_trang_thai_nguoi_dung()
 
     @staticmethod
     def _fmt_pct(value):
@@ -565,7 +506,7 @@ class CuaSoTroLy(QWidget):
         """Hiển thị user hiện tại + mức hỗ trợ PCBM mà không ghi dữ liệu test vào DB."""
         if not hasattr(self, "nhan_muc_ho_tro"):
             return
-        uid = getattr(self, "active_user_id", DEFAULT_USER_ID)
+        uid = getattr(self, "active_user_id", "test_U036")
         try:
             t = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
             if not t.get("done"):
@@ -615,7 +556,7 @@ class CuaSoTroLy(QWidget):
             self.nhan_muc_ho_tro.setToolTip(pred.get("reason_vi") or "")
             self.nhan_muc_ho_tro.setStyleSheet(
                 f"QLabel{{background:{bg};border:1px solid {border};border-radius:14px;"
-                f"font:600 17px Arial;padding:10px 18px;margin:0 60px 14px;color:{fg};}}"
+                f"font:600 17px Arial;padding:8px 18px;margin:4px 60px 8px;color:{fg};}}"
             )
             if hasattr(self, "nhan_chat_muc_ho_tro"):
                 self.nhan_chat_muc_ho_tro.setText(
@@ -1120,5 +1061,11 @@ class CuaSoTroLy(QWidget):
 def chay_tro_ly():
     app = QApplication(sys.argv)
     w = CuaSoTroLy()
+
+    # Robot mode: dùng fullscreen thật để window manager không co cửa sổ
+    # và không làm lộ desktop/dock ở các cạnh. Các control phía trên đã
+    # được thu nhỏ và lùi vào trong nên vẫn nằm trong vùng an toàn.
     w.showFullScreen()
+    w.raise_()
+    w.activateWindow()
     sys.exit(app.exec())
