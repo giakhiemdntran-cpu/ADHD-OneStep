@@ -169,8 +169,7 @@ class BoDinhTuyenYDinh:
             cur = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
             if self.dich_vu_huan_luyen:
                 self.dich_vu_huan_luyen.ghi_nhat_ky("START", cur.get("task_id"), cur.get("occurrence_id"), cur.get("habit_key"), r)
-            if self.dich_vu_pcbm:
-                self.dich_vu_pcbm.ghi_su_kien("TASK_STARTED", cur.get("task_id"), cur.get("occurrence_id"), r)
+            # TASK_STARTED đã được ghi tập trung trong DichVuNhiemVu.bat_dau_lan_thuc_hien().
             return {"reply": f"Bắt đầu nhé. Việc hiện tại là {cur['current_step']}.", "state": "success", "refresh": True}
 
         if intent == "complete_task" and conf >= 0.55:

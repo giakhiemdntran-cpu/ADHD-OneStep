@@ -2,10 +2,22 @@ import json
 from datetime import datetime, timedelta
 from dich_vu.co_so_du_lieu import lay_ket_noi_csdl
 from cau_hinh import DEFAULT_DELAY_MINUTES
+from cau_hinh import DEFAULT_USER_ID
+from dich_vu.dich_vu_pcbm import DichVuPCBM
+
 
 DAY={0:"MON",1:"TUE",2:"WED",3:"THU",4:"FRI",5:"SAT",6:"SUN"}
 
 class DichVuNhiemVu:
+    def __init__(self, user_id=DEFAULT_USER_ID):
+        self.active_user_id = user_id or DEFAULT_USER_ID
+        self.pcbm = DichVuPCBM(user_id=self.active_user_id)
+
+    def dat_nguoi_dung_hien_tai(self, user_id):
+        """Đồng bộ active user cho task service và PCBM nội bộ."""
+        self.active_user_id = user_id or DEFAULT_USER_ID
+        self.pcbm.active_user_id = self.active_user_id
+
     def _nhiem_vu(self,r):
         if r is None: return None
         d=dict(r)
@@ -133,15 +145,74 @@ class DichVuNhiemVu:
         with lay_ket_noi_csdl() as c:
             c.execute("UPDATE task_occurrences SET reminded_at=? WHERE id=?",(datetime.now().isoformat(timespec="seconds"),occurrence_id))
 
-    def bat_dau_lan_thuc_hien(self,occurrence_id):
-        now=datetime.now(); now_s=now.isoformat(timespec="seconds")
+    def bat_dau_lan_thuc_hien(self, occurrence_id):
+
+        now = datetime.now()
+        now_s = now.isoformat(timespec="seconds")
+
         with lay_ket_noi_csdl() as c:
-            r=c.execute("SELECT * FROM task_occurrences WHERE id=? AND status='pending'",(occurrence_id,)).fetchone()
-            if not r: return {"success":False,"message":"Không tìm thấy nhiệm vụ đang hoạt động."}
-            if r["started_at"]: return {"success":True,"started_at":r["started_at"],"start_delay_minutes":r["start_delay_minutes"]}
-            due=datetime.fromisoformat(r["scheduled_at"]); delay=max(0.0,(now-due).total_seconds()/60.0)
-            c.execute("UPDATE task_occurrences SET started_at=?,start_delay_minutes=? WHERE id=?",(now_s,round(delay,2),occurrence_id))
-        return {"success":True,"started_at":now_s,"start_delay_minutes":round(delay,2)}
+
+            r = c.execute(
+                """
+                SELECT *
+                FROM task_occurrences
+                WHERE id=? AND status='pending'
+                """,
+                (occurrence_id,)
+            ).fetchone()
+
+            if not r:
+                return {
+                    "success": False,
+                    "message": "Không tìm thấy nhiệm vụ đang hoạt động."
+                }
+
+            if r["started_at"]:
+                return {
+                    "success": True,
+                    "started_at": r["started_at"],
+                    "start_delay_minutes": r["start_delay_minutes"]
+                }
+
+            due = datetime.fromisoformat(r["scheduled_at"])
+
+            delay = max(
+                0.0,
+                (now - due).total_seconds() / 60.0
+            )
+
+            c.execute(
+                """
+                UPDATE task_occurrences
+                SET started_at=?,
+                    start_delay_minutes=?
+                WHERE id=?
+                """,
+                (
+                    now_s,
+                    round(delay, 2),
+                    occurrence_id
+                )
+            )
+
+            task_id = r["task_id"]
+
+        # Ghi sự kiện PCBM
+        self.pcbm.ghi_su_kien(
+            event_type="TASK_STARTED",
+            task_id=task_id,
+            occurrence_id=occurrence_id,
+            user_id=self.active_user_id,
+            data={
+                "start_delay_minutes": round(delay, 2)
+            }
+        )
+
+        return {
+            "success": True,
+            "started_at": now_s,
+            "start_delay_minutes": round(delay, 2)
+        }
 
     def bat_dau_hien_tai_nhiem_vu(self):
         cur=self.lay_nhiem_vu_hien_tai()

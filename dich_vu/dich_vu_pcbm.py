@@ -10,20 +10,48 @@ from cau_hinh import (
     PCBM_RECALL_MODEL,
     PCBM_COMPLETION_MODEL,
     PCBM_SAMPLE_DATA,
+    DEFAULT_USER_ID,
 )
 from dich_vu.co_so_du_lieu import lay_ket_noi_csdl
 from huan_luyen_pcbm.xay_dung_dac_trung import xay_dung_dac_trung
 
-
 class DichVuPCBM:
     """Tích hợp mô hình hành vi nhận thức cá nhân PCBM với dữ liệu sự kiện và mô hình dự đoán."""
 
-    def __init__(self):
+    def __init__(self, user_id=DEFAULT_USER_ID):
+        self.active_user_id = user_id
+
         self.duoc_bat = bool(PCBM_ENABLED)
         self.ap_dung_muc_nhac = bool(PCBM_APPLY_PROMPT_LEVEL)
+
         self._mo_hinh_tu_nho = None
         self._mo_hinh_hoan_thanh = None
+
         self.tai_lai_mo_hinh()
+
+    def dat_nguoi_dung_hien_tai(self, user_id):
+        """Đổi người dùng hiện tại của PCBM."""
+        user_id = str(user_id or "").strip()
+
+        if not user_id:
+            user_id = DEFAULT_USER_ID
+
+        self.active_user_id = user_id
+
+    def liet_ke_nguoi_dung(self):
+        with lay_ket_noi_csdl() as c:
+            rows = c.execute(
+                """
+                SELECT user_id, COUNT(*) AS total_events
+                FROM pcbm_events
+                WHERE user_id IS NOT NULL
+                AND TRIM(user_id) <> ''
+                GROUP BY user_id
+                ORDER BY total_events DESC, user_id ASC
+                """
+            ).fetchall()
+
+        return [dict(r) for r in rows]
 
     def tai_lai_mo_hinh(self):
         self._mo_hinh_tu_nho = self._tai_mo_hinh(PCBM_RECALL_MODEL)
@@ -70,17 +98,37 @@ class DichVuPCBM:
             "last_training_run": dict(last_run) if last_run else None,
         }
 
-    def ghi_su_kien(self, event_type, task_id=None, occurrence_id=None, data=None,
-                  user_id="local_user", timestamp=None):
+    def ghi_su_kien(
+        self,
+        event_type,
+        task_id=None,
+        occurrence_id=None,
+        data=None,
+        user_id=None,
+        timestamp=None
+    ):
+        if user_id is None:
+            user_id = self.active_user_id
+
         if not self.duoc_bat:
             return None
+
         now = timestamp or datetime.now().isoformat(timespec="seconds")
         data = data or {}
+
         with lay_ket_noi_csdl() as c:
             cur = c.execute(
-                """INSERT INTO pcbm_events(
-                    user_id, task_id, occurrence_id, event_type, data_json, created_at
-                ) VALUES(?,?,?,?,?,?)""",
+                """
+                INSERT INTO pcbm_events(
+                    user_id,
+                    task_id,
+                    occurrence_id,
+                    event_type,
+                    data_json,
+                    created_at
+                )
+                VALUES(?,?,?,?,?,?)
+                """,
                 (
                     user_id,
                     str(task_id) if task_id is not None else None,
@@ -90,6 +138,7 @@ class DichVuPCBM:
                     now,
                 )
             )
+
             return cur.lastrowid
 
     def lay_su_kien_gan_day(self, limit=200):
@@ -123,10 +172,18 @@ class DichVuPCBM:
             out.append(d)
         return out
 
-    def _db_su_kien(self, user_id="local_user"):
+    def _db_su_kien(self, user_id=None):
+        if user_id is None:
+            user_id = self.active_user_id
+
         with lay_ket_noi_csdl() as c:
             rows = c.execute(
-                "SELECT * FROM pcbm_events WHERE user_id=? ORDER BY created_at,id",
+                """
+                SELECT *
+                FROM pcbm_events
+                WHERE user_id=?
+                ORDER BY created_at, id
+                """,
                 (user_id,)
             ).fetchall()
         events = []
@@ -203,7 +260,14 @@ class DichVuPCBM:
             print("[PCBM PREDICT ERROR]", e)
             return None
 
-    def de_xuat_muc_ho_tro(self, current_task, base_prompt_level=1, user_id="local_user"):
+    def de_xuat_muc_ho_tro(
+        self,
+        current_task,
+        base_prompt_level=1,
+        user_id=None
+    ):
+        if user_id is None:
+            user_id = self.active_user_id
         if not self.duoc_bat or not current_task or current_task.get("done"):
             return {
                 "enabled": self.duoc_bat,

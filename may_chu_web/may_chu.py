@@ -6,18 +6,18 @@ from dich_vu.dich_vu_huan_luyen import DichVuHuanLuyen
 from dich_vu.thoi_gian_chay import lay_dich_vu_thi_giac
 from dich_vu.dich_vu_vong_deo import DichVuVongDeo
 from dich_vu.dich_vu_pcbm import DichVuPCBM
-from cau_hinh import ADHD_MODE_ENABLED, COACHING_DEVICE_MODE
+from cau_hinh import ADHD_MODE_ENABLED, COACHING_DEVICE_MODE, DEFAULT_USER_ID
 
 
 def tao_ung_dung_web():
     khoi_tao_co_so_du_lieu()
     app = Flask(__name__, template_folder="templates")
-    dich_vu_nhiem_vu = DichVuNhiemVu()
+    dich_vu_nhiem_vu = DichVuNhiemVu(user_id=DEFAULT_USER_ID)
     dich_vu_ai = DichVuAI()
     dich_vu_huan_luyen = DichVuHuanLuyen(dich_vu_nhiem_vu, dich_vu_ai)
     dich_vu_thi_giac = lay_dich_vu_thi_giac()
     dich_vu_vong_deo = DichVuVongDeo(dich_vu_nhiem_vu, dich_vu_huan_luyen)
-    dich_vu_pcbm = DichVuPCBM()
+    dich_vu_pcbm = DichVuPCBM(user_id=DEFAULT_USER_ID)
     dich_vu_vong_deo.dam_bao_luoc_do()
 
     @app.get("/")
@@ -153,8 +153,7 @@ def tao_ung_dung_web():
     def bat_dau_hien_tai():
         cur = dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
         result = dich_vu_nhiem_vu.bat_dau_hien_tai_nhiem_vu()
-        if not cur.get("done") and result.get("success"):
-            dich_vu_pcbm.ghi_su_kien("TASK_STARTED", cur.get("task_id"), cur.get("occurrence_id"), result)
+        # TASK_STARTED đã được ghi tập trung trong DichVuNhiemVu.bat_dau_lan_thuc_hien().
         return jsonify(result)
 
     @app.get("/api/coaching/progress")

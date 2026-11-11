@@ -193,7 +193,7 @@ online, health = kiem_tra_api_truc_tuyen()
 state = lay_trang_thai()
 
 st.sidebar.title("🧠 ADHD OneStep")
-st.sidebar.caption("Trung tâm điều khiển v9.9.3 · AI nhận thức cá nhân")
+st.sidebar.caption("Huấn luyện viên nhận thức AI")
 if online:
     st.sidebar.success("Máy chủ OneStep: Đang hoạt động")
 else:

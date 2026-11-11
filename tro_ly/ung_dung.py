@@ -6,14 +6,15 @@ from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QPixmap, QPainter, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy,
-    QPushButton, QStackedWidget, QLineEdit, QScrollArea, QFrame
+    QPushButton, QStackedWidget, QLineEdit, QScrollArea, QFrame, QComboBox
 )
 
 from cau_hinh import (
     FACE_DIR, AUTO_LISTEN, REMINDER_CHECK_MS,
     ADHD_MODE_ENABLED, COACHING_DEVICE_MODE,
+    DEFAULT_USER_ID,
 )
-from dich_vu.co_so_du_lieu import khoi_tao_co_so_du_lieu
+from dich_vu.co_so_du_lieu import khoi_tao_co_so_du_lieu, lay_ket_noi_csdl
 from dich_vu.dich_vu_nhiem_vu import DichVuNhiemVu
 from dich_vu.dich_vu_ai import DichVuAI
 from dich_vu.dich_vu_nhan_dang_giong_noi import DichVuNhanDangGiongNoi
@@ -22,6 +23,7 @@ from dich_vu.dich_vu_huan_luyen import DichVuHuanLuyen
 from dich_vu.thoi_gian_chay import lay_dich_vu_thi_giac
 from dich_vu.dich_vu_vong_deo import DichVuVongDeo
 from dich_vu.dich_vu_pcbm import DichVuPCBM
+from dich_vu.cai_dat_nguoi_dung import tai_cai_dat, luu_cai_dat
 from tro_ly.bo_dinh_tuyen_y_dinh import BoDinhTuyenYDinh
 from tro_ly.cua_so_cai_dat import CuaSoCaiDat
 from tro_ly.cua_so_tro_giup import CuaSoTroGiup
@@ -33,8 +35,6 @@ class KenhTinHieu(QObject):
     doc_giong_noi_xong = Signal()
     ket_qua = Signal(object)
     muc_am_thanh = Signal(float, float)
-
-
 
 
 class ThanhMucAmThanh(QWidget):
@@ -103,6 +103,16 @@ class CuaSoTroLy(QWidget):
         self.dich_vu_doc_giong_noi = DichVuDocGiongNoi()
         self.dich_vu_vong_deo = DichVuVongDeo(self.dich_vu_nhiem_vu, self.dich_vu_huan_luyen)
         self.dich_vu_pcbm = DichVuPCBM()
+
+        # Người dùng hiện tại của robot.
+        self.active_user_id = str(
+            tai_cai_dat().get("active_user_id") or DEFAULT_USER_ID
+        ).strip() or DEFAULT_USER_ID
+
+        # Đồng bộ active user xuống các service.
+        self.dich_vu_pcbm.active_user_id = self.active_user_id
+        self.dich_vu_nhiem_vu.active_user_id = self.active_user_id
+
         self.dich_vu_vong_deo.dam_bao_luoc_do()
         self.bo_dinh_tuyen = BoDinhTuyenYDinh(self.dich_vu_nhiem_vu, self.dich_vu_ai, self.dich_vu_huan_luyen, self.dich_vu_thi_giac, self.dich_vu_pcbm)
 
@@ -139,6 +149,30 @@ class CuaSoTroLy(QWidget):
         root.setSpacing(6)
 
         top_bar = QHBoxLayout()
+
+        nhan_user = QLabel("👤  Người dùng:")
+        nhan_user.setStyleSheet("font:600 17px Arial;color:#365A52;padding-left:4px;")
+        top_bar.addWidget(nhan_user)
+
+        self.chon_nguoi_dung = QComboBox()
+        self.chon_nguoi_dung.setFixedHeight(44)
+        self.chon_nguoi_dung.setMinimumWidth(170)
+        self.chon_nguoi_dung.setToolTip("Chọn người dùng hiện tại cho Robot Buddy")
+        self.chon_nguoi_dung.setStyleSheet(
+            "QComboBox{background:#FFFFFF;border:1px solid #AFCFC7;border-radius:14px;"
+            "padding:7px 12px;font:700 17px Arial;color:#23463E;}"
+            "QComboBox:hover{border-color:#2F7D6D;}"
+            "QComboBox::drop-down{border:none;width:28px;}"
+        )
+        user_ids = self.liet_ke_user_ids_pcbm()
+        for uid in [self.active_user_id, DEFAULT_USER_ID] + user_ids:
+            if uid and self.chon_nguoi_dung.findText(uid) < 0:
+                self.chon_nguoi_dung.addItem(uid)
+        idx_user = self.chon_nguoi_dung.findText(self.active_user_id)
+        self.chon_nguoi_dung.setCurrentIndex(idx_user if idx_user >= 0 else 0)
+        self.chon_nguoi_dung.currentTextChanged.connect(self.doi_nguoi_dung_hien_tai)
+        top_bar.addWidget(self.chon_nguoi_dung)
+
         top_bar.addStretch(1)
         self.nut_chuyen_giao_dien = QPushButton("💬  Chat")
         self.nut_chuyen_giao_dien.setCursor(Qt.PointingHandCursor)
@@ -247,8 +281,17 @@ class CuaSoTroLy(QWidget):
         self.nhan_nhiem_vu = QLabel("")
         self.nhan_nhiem_vu.setAlignment(Qt.AlignCenter)
         self.nhan_nhiem_vu.setWordWrap(True)
-        self.nhan_nhiem_vu.setStyleSheet("font:18px Arial;padding:0 40px 24px;color:#567078;")
+        self.nhan_nhiem_vu.setStyleSheet("font:18px Arial;padding:0 40px 8px;color:#567078;")
         lay.addWidget(self.nhan_nhiem_vu)
+
+        self.nhan_muc_ho_tro = QLabel("Đang tải trạng thái PCBM...")
+        self.nhan_muc_ho_tro.setAlignment(Qt.AlignCenter)
+        self.nhan_muc_ho_tro.setWordWrap(True)
+        self.nhan_muc_ho_tro.setStyleSheet(
+            "QLabel{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:14px;"
+            "font:600 17px Arial;padding:10px 18px;margin:0 60px 14px;color:#315C52;}"
+        )
+        lay.addWidget(self.nhan_muc_ho_tro)
         self.ngan_xep_giao_dien.addWidget(self.trang_khuon_mat)
 
         # -------- Trang lịch sử chat --------
@@ -288,6 +331,13 @@ class CuaSoTroLy(QWidget):
         khoi_tieu_de.addWidget(phu_de_chat)
         dau_lay.addLayout(khoi_tieu_de)
         dau_lay.addStretch(1)
+        self.nhan_chat_muc_ho_tro = QLabel("PCBM")
+        self.nhan_chat_muc_ho_tro.setAlignment(Qt.AlignCenter)
+        self.nhan_chat_muc_ho_tro.setStyleSheet(
+            "QLabel{background:#EAF5F2;border:1px solid #BCDAD2;border-radius:12px;"
+            "padding:7px 12px;font:600 14px Arial;color:#2F6F61;}"
+        )
+        dau_lay.addWidget(self.nhan_chat_muc_ho_tro)
         chat_lay.addWidget(khung_dau_chat)
 
         # Vùng hội thoại dùng widget thật thay vì HTML để bubble đẹp và ổn định trên Qt.
@@ -378,6 +428,127 @@ class CuaSoTroLy(QWidget):
         self.tiep_theo_khung_hinh()
         if AUTO_LISTEN:
             QTimer.singleShot(900, self.lang_nghe)
+
+    def liet_ke_user_ids_pcbm(self):
+        """Lấy danh sách user_id hiện có trong pcbm_events để đổ vào ComboBox."""
+        try:
+            with lay_ket_noi_csdl() as c:
+                rows = c.execute(
+                    """
+                    SELECT user_id, COUNT(*) AS total_events
+                    FROM pcbm_events
+                    WHERE user_id IS NOT NULL
+                      AND TRIM(user_id) <> ''
+                    GROUP BY user_id
+                    ORDER BY total_events DESC, user_id ASC
+                    """
+                ).fetchall()
+            return [str(r["user_id"]) for r in rows if r["user_id"]]
+        except Exception as e:
+            print("[PCBM USER LIST ERROR]", e)
+            return []
+
+    def doi_nguoi_dung_hien_tai(self, user_id):
+        user_id = str(user_id or "").strip()
+        if not user_id:
+            return
+        self.active_user_id = user_id
+
+        # Đồng bộ user hiện tại xuống các service.
+        self.dich_vu_pcbm.active_user_id = user_id
+        self.dich_vu_nhiem_vu.active_user_id = user_id
+
+        settings = tai_cai_dat()
+        settings["active_user_id"] = user_id
+        luu_cai_dat(settings)
+        print("[ACTIVE USER]", user_id)
+        self.lam_moi_trang_thai_nguoi_dung()
+
+    @staticmethod
+    def _fmt_pct(value):
+        if value is None:
+            return "—"
+        try:
+            return f"{float(value):.1f}%"
+        except Exception:
+            return "—"
+
+    def lam_moi_trang_thai_nguoi_dung(self):
+        """Hiển thị user hiện tại + khuyến nghị PCBM từ luồng thật."""
+        if not hasattr(self, "nhan_muc_ho_tro"):
+            return
+
+        uid = getattr(self, "active_user_id", DEFAULT_USER_ID)
+
+        try:
+            t = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
+
+            if t.get("done"):
+                self.nhan_muc_ho_tro.setText(
+                    f"👤 {uid}  •  Chưa có nhiệm vụ hiện tại để PCBM đánh giá"
+                )
+                if hasattr(self, "nhan_chat_muc_ho_tro"):
+                    self.nhan_chat_muc_ho_tro.setText(f"👤 {uid}  •  PCBM chờ nhiệm vụ")
+                return
+
+            try:
+                base_level = int(self.dich_vu_huan_luyen.lay_muc_nhac(t))
+            except Exception:
+                base_level = 1
+
+            # Dùng đúng API PCBM hiện có; không gọi các hàm demo chưa được khai báo.
+            pred = self.dich_vu_pcbm.de_xuat_muc_ho_tro(
+                t,
+                base_level,
+                uid
+            ) or {}
+
+            rec = int(pred.get("recommended_prompt_level", base_level))
+
+            recall_p = pred.get("recall_probability")
+            completion_p = pred.get("completion_30m_probability")
+
+            recall = "—" if recall_p is None else f"{float(recall_p) * 100:.1f}%"
+            completion = "—" if completion_p is None else f"{float(completion_p) * 100:.1f}%"
+
+            if rec < base_level:
+                huong = "↓ giảm hỗ trợ"
+                bg, border, fg = "#EAF7EF", "#A9D8B8", "#28623A"
+            elif rec > base_level:
+                huong = "↑ tăng hỗ trợ"
+                bg, border, fg = "#FFF3E8", "#E9C39C", "#8B5520"
+            else:
+                huong = "= giữ mức"
+                bg, border, fg = "#EEF5FB", "#BDD4E8", "#315E7D"
+
+            text = (
+                f"👤 {uid}   •   Hỗ trợ hiện tại: Level {base_level}   →   "
+                f"PCBM đề xuất: Level {rec} ({huong})   •   "
+                f"Recall {recall}   •   Completion≤30m {completion}"
+            )
+
+            self.nhan_muc_ho_tro.setText(text)
+            self.nhan_muc_ho_tro.setToolTip(pred.get("reason_code") or "")
+            self.nhan_muc_ho_tro.setStyleSheet(
+                f"QLabel{{background:{bg};border:1px solid {border};border-radius:14px;"
+                f"font:600 17px Arial;padding:10px 18px;margin:0 60px 14px;color:{fg};}}"
+            )
+
+            if hasattr(self, "nhan_chat_muc_ho_tro"):
+                self.nhan_chat_muc_ho_tro.setText(
+                    f"👤 {uid}  •  L{base_level}→L{rec}  •  Recall {recall}"
+                )
+                self.nhan_chat_muc_ho_tro.setToolTip(pred.get("reason_code") or "")
+
+        except Exception as e:
+            print("[PCBM USER STATUS ERROR]", e)
+            self.nhan_muc_ho_tro.setText(
+                f"👤 {uid}  •  Chưa đủ dữ liệu để hiển thị mức hỗ trợ"
+            )
+            if hasattr(self, "nhan_chat_muc_ho_tro"):
+                self.nhan_chat_muc_ho_tro.setText(
+                    f"👤 {uid}  •  PCBM chưa sẵn sàng"
+                )
 
     def mo_cai_dat(self):
         """Mở Settings. Thiết bị/buffer áp dụng từ lượt tiếp theo."""
@@ -627,6 +798,7 @@ class CuaSoTroLy(QWidget):
     resizeEvent = thay_doi_kich_thuoc
 
     def lam_moi_nhiem_vu(self):
+        self.lam_moi_trang_thai_nguoi_dung()
         t = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
         if t.get("done"):
             self.nhan_nhiem_vu.setText("")
@@ -687,7 +859,7 @@ class CuaSoTroLy(QWidget):
         # PCBM dự đoán xác suất tự nhớ / hoàn thành từ lịch sử sự kiện cá nhân.
         # Mặc định PCBM chỉ đưa khuyến nghị. Đặt PCBM_APPLY_PROMPT_LEVEL=1 để cho phép
         # mô hình thay đổi một mức nhắc nhưng vẫn tuân thủ giới hạn huấn luyện ghi nhớ 0..2.
-        rec = self.dich_vu_pcbm.de_xuat_muc_ho_tro(t, base_level)
+        rec = self.dich_vu_pcbm.de_xuat_muc_ho_tro(t, base_level, self.active_user_id)
         level = rec.get("recommended_prompt_level", base_level) if rec.get("applied") else base_level
         print("[PCBM]", rec)
 
@@ -705,6 +877,7 @@ class CuaSoTroLy(QWidget):
                 "reminder_type": "generic" if level <= 1 else "explicit",
                 "channel": "buddy",
             },
+            user_id=self.active_user_id,
         )
 
         if level == 0:

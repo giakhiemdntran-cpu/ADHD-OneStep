@@ -71,6 +71,7 @@ DEFAULT_HELP_PROMPTS = {
 
 
 DEFAULTS = {
+    "active_user_id": "test_U036",
     "audio_input_device": None,
     "audio_output_device": None,
     "camera_source": VISION_CAMERA_SOURCE,
@@ -124,6 +125,7 @@ def _sanitize(data):
             result[key] = DEFAULTS[key]
 
     result["vieneu_voice"] = str(result.get("vieneu_voice") or VIENEU_VOICE).strip() or VIENEU_VOICE
+    result["active_user_id"] = str(result.get("active_user_id") or "test_U036").strip() or "test_U036"
 
     raw_prompts = result.get("help_prompts")
     prompts = {}
