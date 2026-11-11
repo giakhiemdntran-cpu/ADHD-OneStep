@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, render_template, request, send_file, abort
+from datetime import datetime
 from dich_vu.co_so_du_lieu import khoi_tao_co_so_du_lieu
 from dich_vu.dich_vu_nhiem_vu import DichVuNhiemVu
 from dich_vu.dich_vu_ai import DichVuAI
@@ -6,18 +7,18 @@ from dich_vu.dich_vu_huan_luyen import DichVuHuanLuyen
 from dich_vu.thoi_gian_chay import lay_dich_vu_thi_giac
 from dich_vu.dich_vu_vong_deo import DichVuVongDeo
 from dich_vu.dich_vu_pcbm import DichVuPCBM
-from cau_hinh import ADHD_MODE_ENABLED, COACHING_DEVICE_MODE, DEFAULT_USER_ID
+from cau_hinh import ADHD_MODE_ENABLED, COACHING_DEVICE_MODE
 
 
 def tao_ung_dung_web():
     khoi_tao_co_so_du_lieu()
     app = Flask(__name__, template_folder="templates")
-    dich_vu_nhiem_vu = DichVuNhiemVu(user_id=DEFAULT_USER_ID)
+    dich_vu_nhiem_vu = DichVuNhiemVu()
     dich_vu_ai = DichVuAI()
     dich_vu_huan_luyen = DichVuHuanLuyen(dich_vu_nhiem_vu, dich_vu_ai)
     dich_vu_thi_giac = lay_dich_vu_thi_giac()
     dich_vu_vong_deo = DichVuVongDeo(dich_vu_nhiem_vu, dich_vu_huan_luyen)
-    dich_vu_pcbm = DichVuPCBM(user_id=DEFAULT_USER_ID)
+    dich_vu_pcbm = DichVuPCBM()
     dich_vu_vong_deo.dam_bao_luoc_do()
 
     @app.get("/")
@@ -153,7 +154,8 @@ def tao_ung_dung_web():
     def bat_dau_hien_tai():
         cur = dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
         result = dich_vu_nhiem_vu.bat_dau_hien_tai_nhiem_vu()
-        # TASK_STARTED đã được ghi tập trung trong DichVuNhiemVu.bat_dau_lan_thuc_hien().
+        if not cur.get("done") and result.get("success"):
+            dich_vu_pcbm.ghi_su_kien("TASK_STARTED", cur.get("task_id"), cur.get("occurrence_id"), result)
         return jsonify(result)
 
     @app.get("/api/coaching/progress")
@@ -210,6 +212,78 @@ def tao_ung_dung_web():
     @app.get("/api/pcbm/predictions")
     def lay_du_doan_pcbm():
         return jsonify({"success": True, "predictions": dich_vu_pcbm.lay_du_doan_gan_day(int(request.args.get("limit", 100)))})
+
+
+    @app.get("/api/pcbm/users")
+    def pcbm_danh_sach_nguoi_dung():
+        try:
+            return jsonify({"success": True, "users": dich_vu_pcbm.liet_ke_nguoi_dung()})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)}), 500
+
+    def _pcbm_playground_payload(d):
+        text = (d.get("text") or "").strip()
+        parsed = {}
+        if text:
+            try:
+                parsed = dich_vu_ai.phan_tich_lenh(text) or {}
+            except Exception:
+                parsed = {}
+        title = (d.get("title") or parsed.get("title") or text or "Làm bài Toán").strip()
+        est = d.get("estimated_minutes")
+        if est in (None, ""):
+            est = parsed.get("estimated_minutes") or 30
+        return {
+            "text": text,
+            "parsed": parsed,
+            "title": title,
+            "estimated_minutes": est,
+            "priority": d.get("priority", 1),
+            "base_prompt_level": d.get("base_prompt_level", 1),
+            "channel": d.get("channel", "buddy"),
+        }
+
+    @app.post("/api/pcbm/playground/test")
+    def pcbm_playground_test():
+        d = request.get_json(silent=True) or {}
+        user_id = (d.get("user_id") or "").strip()
+        if not user_id:
+            return jsonify({"success": False, "message": "Hãy chọn user."}), 400
+        try:
+            p = _pcbm_playground_payload(d)
+            demo_time = dich_vu_pcbm.thoi_diem_demo_theo_lich_su([user_id]) if d.get("anchor_to_history", True) else None
+            result = dich_vu_pcbm.thu_nghiem_kich_ban(
+                user_id=user_id,
+                title=p["title"],
+                base_prompt_level=p["base_prompt_level"],
+                estimated_minutes=p["estimated_minutes"],
+                priority=p["priority"],
+                channel=p["channel"],
+                decision_time=demo_time,
+            )
+            return jsonify({"success": True, "parsed_command": p["parsed"], "result": result, "demo_time": demo_time.isoformat() if demo_time else None})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)}), 500
+
+    @app.post("/api/pcbm/playground/compare")
+    def pcbm_playground_compare():
+        d = request.get_json(silent=True) or {}
+        user_ids = d.get("user_ids") or []
+        try:
+            p = _pcbm_playground_payload(d)
+            demo_time = None  # so_sanh_nguoi_dung sẽ neo theo lịch sử gần nhất của từng user
+            results = dich_vu_pcbm.so_sanh_nguoi_dung(
+                user_ids=user_ids,
+                title=p["title"],
+                base_prompt_level=p["base_prompt_level"],
+                estimated_minutes=p["estimated_minutes"],
+                priority=p["priority"],
+                channel=p["channel"],
+                decision_time=demo_time,
+            )
+            return jsonify({"success": True, "parsed_command": p["parsed"], "results": results, "demo_time": demo_time.isoformat() if demo_time else None})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)}), 400
 
     @app.get("/api/vision/status")
     def thi_giac_trang_thai():

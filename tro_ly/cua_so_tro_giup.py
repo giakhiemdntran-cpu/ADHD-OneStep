@@ -2,8 +2,8 @@ from copy import deepcopy
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QListWidget,
-    QListWidgetItem, QPushButton, QInputDialog, QMessageBox
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QListWidget,
+    QListWidgetItem, QPushButton, QInputDialog, QMessageBox, QSizePolicy
 )
 
 from dich_vu.cai_dat_nguoi_dung import (
@@ -25,32 +25,62 @@ class CuaSoTroGiup(QDialog):
         )
 
         self.setWindowTitle("Trợ giúp - Cách nói với OneStep Buddy")
-        self.setMinimumSize(760, 600)
-        self.resize(860, 660)
-        self.setStyleSheet("""
-            QDialog { background:#F2F9F7; color:#20303A; }
-            QLabel#title { font:700 26px Arial; color:#20303A; }
-            QLabel#hint { font:15px Arial; color:#6F8780; }
-            QComboBox, QListWidget {
-                background:#FFFFFF; border:1px solid #CFE1DD; border-radius:12px;
-                padding:8px; font:16px Arial; color:#20303A;
-            }
-            QListWidget::item { padding:10px 8px; border-bottom:1px solid #EEF4F2; }
-            QListWidget::item:selected { background:#DDF2EC; color:#173A33; }
-            QPushButton {
-                background:#FFFFFF; border:1px solid #CFE1DD; border-radius:16px;
-                padding:9px 16px; font:600 15px Arial; color:#20303A;
-            }
-            QPushButton:hover { background:#E6F3F0; }
-            QPushButton#usePrompt { background:#2F7D6D; color:#FFFFFF; border:none; }
-            QPushButton#usePrompt:hover { background:#286E61; }
-            QPushButton#deletePrompt { color:#A33A3A; }
-            QPushButton#deletePrompt:hover { background:#F9EAEA; }
+
+        # Tự co theo màn hình robot. Bản desktop trước đây 860x660 làm
+        # hàng nút Đóng/Đưa vào Chat bị khuất trên LCD nhỏ.
+        screen = QApplication.primaryScreen()
+        geo = screen.availableGeometry() if screen else None
+        avail_w = geo.width() if geo else 800
+        avail_h = geo.height() if geo else 480
+        compact = avail_w <= 1024 or avail_h <= 600
+
+        if compact:
+            self.setMinimumSize(540, 340)
+            self.resize(
+                max(540, min(760, avail_w - 28)),
+                max(340, min(430, avail_h - 28)),
+            )
+        else:
+            self.setMinimumSize(760, 600)
+            self.resize(860, 660)
+
+        title_px = 18 if compact else 26
+        hint_px = 11 if compact else 15
+        list_px = 12 if compact else 16
+        btn_px = 12 if compact else 15
+        list_pad = 5 if compact else 8
+        item_pad = 6 if compact else 10
+        btn_vpad = 6 if compact else 9
+        btn_hpad = 11 if compact else 16
+
+        self.setStyleSheet(f"""
+            QDialog {{ background:#F2F9F7; color:#20303A; }}
+            QLabel#title {{ font:700 {title_px}px Arial; color:#20303A; }}
+            QLabel#hint {{ font:{hint_px}px Arial; color:#6F8780; }}
+            QComboBox, QListWidget {{
+                background:#FFFFFF; border:1px solid #CFE1DD; border-radius:10px;
+                padding:{list_pad}px; font:{list_px}px Arial; color:#20303A;
+            }}
+            QListWidget::item {{ padding:{item_pad}px 7px; border-bottom:1px solid #EEF4F2; }}
+            QListWidget::item:selected {{ background:#DDF2EC; color:#173A33; }}
+            QPushButton {{
+                background:#FFFFFF; border:1px solid #CFE1DD; border-radius:14px;
+                padding:{btn_vpad}px {btn_hpad}px; font:600 {btn_px}px Arial; color:#20303A;
+            }}
+            QPushButton:hover {{ background:#E6F3F0; }}
+            QPushButton#usePrompt {{ background:#2F7D6D; color:#FFFFFF; border:none; }}
+            QPushButton#usePrompt:hover {{ background:#286E61; }}
+            QPushButton#deletePrompt {{ color:#A33A3A; }}
+            QPushButton#deletePrompt:hover {{ background:#F9EAEA; }}
         """)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 22, 24, 22)
-        root.setSpacing(14)
+        if compact:
+            root.setContentsMargins(12, 8, 12, 10)
+            root.setSpacing(6)
+        else:
+            root.setContentsMargins(24, 22, 24, 22)
+            root.setSpacing(14)
 
         title = QLabel("Các câu nói mẫu với OneStep Buddy")
         title.setObjectName("title")
@@ -71,6 +101,9 @@ class CuaSoTroGiup(QDialog):
 
         self.danh_sach = QListWidget()
         self.danh_sach.itemDoubleClicked.connect(lambda _: self._dung_prompt())
+        self.danh_sach.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        if compact:
+            self.danh_sach.setMinimumHeight(110)
         root.addWidget(self.danh_sach, 1)
 
         edit_row = QHBoxLayout()
@@ -95,8 +128,9 @@ class CuaSoTroGiup(QDialog):
         )
         note.setWordWrap(True)
         note.setStyleSheet(
-            "background:#FFFFFF;border:1px solid #D8E7E3;border-radius:12px;"
-            "padding:12px;font:14px Arial;color:#567078;"
+            "background:#FFFFFF;border:1px solid #D8E7E3;border-radius:10px;"
+            + ("padding:5px;font:11px Arial;color:#567078;" if compact
+               else "padding:12px;font:14px Arial;color:#567078;")
         )
         root.addWidget(note)
 

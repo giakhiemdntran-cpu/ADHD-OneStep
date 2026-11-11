@@ -34,6 +34,8 @@ from huan_luyen_pcbm.huan_luyen_tu_csdl import (
     huan_luyen_tu_sqlite_dong,
 )
 from huan_luyen_pcbm.xay_dung_du_lieu import xay_dung_ban_ghi_hoc
+from dich_vu.dich_vu_pcbm import DichVuPCBM
+from dich_vu.trich_xuat_thong_tin import trich_xuat_thong_tin_nhiem_vu
 
 
 MODEL_META = Path(PCBM_RECALL_MODEL).parent / "pcbm_model_meta.json"
@@ -341,6 +343,127 @@ def _batch_test(bundle, df, target):
     return metrics, out
 
 
+
+def _fmt_pct_playground(v):
+    if v is None:
+        return "N/A"
+    try:
+        return f"{float(v):.1f}%"
+    except Exception:
+        return str(v)
+
+
+def _fmt_value_playground(v, suffix=""):
+    if v is None:
+        return "N/A"
+    try:
+        x = float(v)
+        if x.is_integer():
+            return f"{int(x)}{suffix}"
+        return f"{x:.1f}{suffix}"
+    except Exception:
+        return f"{v}{suffix}"
+
+
+def _level_label(level):
+    try:
+        level = int(level)
+    except Exception:
+        return "N/A"
+    return {
+        0: "Level 0 · Quan sát / chưa nhắc",
+        1: "Level 1 · Gợi ý nhẹ",
+        2: "Level 2 · Nhắc rõ nhiệm vụ",
+    }.get(level, f"Level {level}")
+
+
+def _render_playground_result(result, compact=False):
+    """Render một kết quả PCBM Playground theo dạng card dễ demo."""
+    profile = result.get("profile") or {}
+    pred = result.get("prediction") or {}
+    uid = result.get("user_id", "N/A")
+
+    st.markdown(f"### 👤 {uid}")
+    recall = pred.get("recall_percent")
+    completion = pred.get("completion_30m_percent")
+    base_level = pred.get("base_prompt_level")
+    rec_level = pred.get("recommended_prompt_level")
+
+    a, b = st.columns(2)
+    a.metric("P(Recall)", _fmt_pct_playground(recall))
+    b.metric("P(Completion ≤30m)", _fmt_pct_playground(completion))
+
+    if recall is not None:
+        st.progress(max(0.0, min(float(recall) / 100.0, 1.0)), text=f"Khả năng tự nhớ: {_fmt_pct_playground(recall)}")
+    if completion is not None and not compact:
+        st.progress(max(0.0, min(float(completion) / 100.0, 1.0)), text=f"Khả năng hoàn thành ≤30 phút: {_fmt_pct_playground(completion)}")
+
+    c1, c2 = st.columns(2)
+    c1.metric("Mức hiện tại", f"Level {base_level}")
+    delta = None
+    try:
+        d = int(rec_level) - int(base_level)
+        if d > 0:
+            delta = f"+{d} mức"
+        elif d < 0:
+            delta = f"{d} mức"
+        else:
+            delta = "Giữ nguyên"
+    except Exception:
+        pass
+    c2.metric("PCBM đề xuất", f"Level {rec_level}", delta=delta, delta_color="inverse")
+    st.caption(_level_label(rec_level))
+
+    reason = pred.get("reason_vi") or pred.get("reason_code") or ""
+    if rec_level is not None and base_level is not None:
+        if int(rec_level) < int(base_level):
+            st.success(f"⬇️ {reason}")
+        elif int(rec_level) > int(base_level):
+            st.warning(f"⬆️ {reason}")
+        else:
+            st.info(f"➡️ {reason}")
+
+    profile_rows = [
+        ("Số sự kiện", profile.get("event_count")),
+        ("Lịch sử", _fmt_value_playground(profile.get("history_days"), " ngày")),
+        ("Recall 7 ngày", _fmt_pct_playground(profile.get("recall_rate_7d"))),
+        ("Completion 7 ngày", _fmt_pct_playground(profile.get("completion_rate_7d"))),
+        ("Snooze 7 ngày", _fmt_pct_playground(profile.get("snooze_rate_7d"))),
+        ("Forget 7 ngày", _fmt_pct_playground(profile.get("forget_rate_7d"))),
+        ("Độ trễ bắt đầu TB", _fmt_value_playground(profile.get("avg_start_delay_7d"), " phút")),
+        ("Recall streak +", profile.get("recall_success_streak", 0)),
+        ("Recall streak -", profile.get("recall_failure_streak", 0)),
+    ]
+    st.dataframe(pd.DataFrame(profile_rows, columns=["Chỉ số", "Giá trị"]), use_container_width=True, hide_index=True)
+
+    if not compact:
+        with st.expander("🔎 Đặc trưng model đã sử dụng"):
+            feats = (result.get("features") or {}).get("recall") or {}
+            if feats:
+                st.dataframe(pd.DataFrame([feats]), use_container_width=True, hide_index=True)
+            else:
+                st.info("Không có đặc trưng để hiển thị.")
+
+
+def _render_compare_summary(results):
+    rows = []
+    for r in results:
+        p = r.get("profile") or {}
+        y = r.get("prediction") or {}
+        rows.append({
+            "User": r.get("user_id"),
+            "Recall 7d": _fmt_pct_playground(p.get("recall_rate_7d")),
+            "Completion 7d": _fmt_pct_playground(p.get("completion_rate_7d")),
+            "Snooze 7d": _fmt_pct_playground(p.get("snooze_rate_7d")),
+            "Forget 7d": _fmt_pct_playground(p.get("forget_rate_7d")),
+            "Start delay": _fmt_value_playground(p.get("avg_start_delay_7d"), " phút"),
+            "P(Recall)": _fmt_pct_playground(y.get("recall_percent")),
+            "P(Completion)": _fmt_pct_playground(y.get("completion_30m_percent")),
+            "Hiện tại": f"L{y.get('base_prompt_level')}",
+            "Đề xuất": f"L{y.get('recommended_prompt_level')}",
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
 def hien_thi_quan_tri_huan_luyen_pcbm():
     st.markdown(
         '<div class="os-hero"><h2>🧪 Quản trị huấn luyện PCBM</h2>'
@@ -349,10 +472,11 @@ def hien_thi_quan_tri_huan_luyen_pcbm():
     )
     st.info(f"Kết nối trực tiếp: `{DB_PATH}` · Huấn luyện và kiểm thử trực tiếp, không qua Flask API.")
 
-    tab_data, tab_train, tab_test, tab_history = st.tabs([
+    tab_data, tab_train, tab_test, tab_playground, tab_history = st.tabs([
         "🗃️ Dữ liệu huấn luyện",
         "🧠 Huấn luyện mô hình",
         "🧪 Test mô hình",
+        "🎯 PCBM Playground",
         "📜 Lịch sử huấn luyện",
     ])
 
@@ -548,6 +672,178 @@ def hien_thi_quan_tri_huan_luyen_pcbm():
                             st.dataframe(result_df.tail(500), use_container_width=True, hide_index=True)
         except Exception as e:
             st.error(f"Không test được model: {e}")
+
+    with tab_playground:
+        st.subheader("🎯 PCBM Playground")
+        st.caption(
+            "Test PCBM theo từng user hoặc so sánh 3 user trên cùng một tình huống. "
+            "Playground chỉ chạy inference trong RAM, không ghi thêm event/prediction vào SQLite."
+        )
+
+        try:
+            service = DichVuPCBM()
+            user_rows = service.liet_ke_nguoi_dung(limit=500)
+            user_ids = [str(r.get("user_id")) for r in user_rows if r.get("user_id")]
+        except Exception as e:
+            st.error(f"Không khởi tạo được PCBM Playground: {e}")
+            user_ids = []
+            service = None
+
+        if service and user_ids:
+            mode_one, mode_three = st.tabs(["👤 Test 1 user", "👥 So sánh 3 user"])
+
+            with st.container(border=True):
+                st.markdown("#### 📝 Tình huống chung")
+
+                scenario_presets = {
+                    "📘 Làm bài Toán buổi tối":
+                        "19h tối nay em cần làm bài Toán khoảng 30 phút",
+                    "🇬🇧 Học tiếng Anh":
+                        "20h tối nay em cần học từ vựng tiếng Anh khoảng 25 phút",
+                    "🎒 Chuẩn bị cặp sách":
+                        "21h tối nay em cần chuẩn bị sách vở và đồ dùng cho ngày mai khoảng 15 phút",
+                    "🔄 Quay lại sau gián đoạn":
+                        "Em đang làm bài nhưng vừa bị gián đoạn, hãy giúp em quay lại nhiệm vụ trong 20 phút tiếp theo",
+                    "🧩 Bắt đầu nhiệm vụ khó":
+                        "Em có một bài tập khó cần bắt đầu ngay bây giờ và dự kiến làm trong 45 phút",
+                    "📑 Làm dự án dài":
+                        "Tối nay em cần làm dự án nhóm khoảng 60 phút nhưng thường hay trì hoãn",
+                    "🧹 Việc nhà":
+                        "18h30 em cần dọn bàn học và sắp xếp đồ dùng khoảng 15 phút",
+                    "⏰ Nhiệm vụ sắp đến hạn":
+                        "Bài tập cần nộp vào sáng mai, tối nay em cần hoàn thành trong khoảng 40 phút",
+                    "✍️ Tự nhập tình huống khác...": "",
+                }
+
+                preset_labels = list(scenario_presets.keys())
+                if "pcbm_pg_preset" not in st.session_state:
+                    st.session_state["pcbm_pg_preset"] = preset_labels[0]
+                if "pcbm_pg_sentence" not in st.session_state:
+                    st.session_state["pcbm_pg_sentence"] = scenario_presets[preset_labels[0]]
+
+                def _pcbm_apply_preset():
+                    label = st.session_state.get("pcbm_pg_preset")
+                    text = scenario_presets.get(label, "")
+                    if text:
+                        st.session_state["pcbm_pg_sentence"] = text
+                    elif label == "✍️ Tự nhập tình huống khác...":
+                        st.session_state["pcbm_pg_sentence"] = ""
+
+                st.selectbox(
+                    "Tình huống gợi ý",
+                    preset_labels,
+                    key="pcbm_pg_preset",
+                    on_change=_pcbm_apply_preset,
+                    help="Chọn một tình huống mẫu; nội dung sẽ tự điền xuống ô bên dưới và vẫn có thể chỉnh sửa.",
+                )
+                scenario_text = st.text_area(
+                    "Tình huống đang test",
+                    key="pcbm_pg_sentence",
+                    height=90,
+                    placeholder="Ví dụ: 19h tối nay em cần làm bài Toán khoảng 30 phút",
+                )
+                parsed = trich_xuat_thong_tin_nhiem_vu(scenario_text or "")
+                parsed_title = (parsed.get("title") or scenario_text or "Nhiệm vụ thử nghiệm").strip()
+                parsed_minutes = int(parsed.get("estimated_minutes") or 30)
+
+                s1, s2, s3, s4 = st.columns(4)
+                estimated_minutes = int(s1.number_input(
+                    "Thời lượng (phút)", min_value=1, max_value=480,
+                    value=max(1, min(parsed_minutes, 480)), key="pcbm_pg_minutes"
+                ))
+                base_level = int(s2.selectbox(
+                    "Mức hỗ trợ hiện tại", [0, 1, 2], index=1,
+                    format_func=lambda x: _level_label(x), key="pcbm_pg_base_level"
+                ))
+                priority = int(s3.selectbox("Ưu tiên", [1, 2, 3], index=0, key="pcbm_pg_priority"))
+                channel = s4.selectbox("Kênh", ["buddy", "oneband"], index=0, key="pcbm_pg_channel")
+                anchor_history = st.checkbox(
+                    "Neo thời điểm demo theo lịch sử gần nhất của từng user",
+                    value=True,
+                    help="Nên bật với dữ liệu mô phỏng để các feature 1/3/7 ngày không bị rỗng do dataset cũ.",
+                    key="pcbm_pg_anchor_history",
+                )
+                st.caption(
+                    f"Đã hiểu câu: **{parsed_title}** · thời lượng **{estimated_minutes} phút**"
+                    + (f" · thời gian nhận diện **{parsed.get('scheduled_time')}**" if parsed.get("scheduled_time") else "")
+                )
+
+            with mode_one:
+                default_one = "test_U036" if "test_U036" in user_ids else user_ids[0]
+                uid = st.selectbox(
+                    "Chọn user",
+                    user_ids,
+                    index=user_ids.index(default_one),
+                    key="pcbm_pg_one_user",
+                )
+                if st.button("▶️ Chạy PCBM cho user này", type="primary", use_container_width=True, key="pcbm_pg_run_one"):
+                    try:
+                        t = service.thoi_diem_demo_theo_lich_su([uid]) if anchor_history else None
+                        result = service.thu_nghiem_kich_ban(
+                            uid, parsed_title, base_level, estimated_minutes,
+                            priority, channel, t
+                        )
+                        st.session_state["pcbm_pg_one_result"] = result
+                    except Exception as e:
+                        st.error(f"Không chạy được Playground: {e}")
+                result = st.session_state.get("pcbm_pg_one_result")
+                if result:
+                    _render_playground_result(result, compact=False)
+
+            with mode_three:
+                defaults = [x for x in ["test_U036", "test_U029", "test_U015"] if x in user_ids]
+                for uid in user_ids:
+                    if len(defaults) >= 3:
+                        break
+                    if uid not in defaults:
+                        defaults.append(uid)
+                c1, c2, c3 = st.columns(3)
+                u1 = c1.selectbox("User A", user_ids, index=user_ids.index(defaults[0]), key="pcbm_pg_u1")
+                u2 = c2.selectbox("User B", user_ids, index=user_ids.index(defaults[1]), key="pcbm_pg_u2")
+                u3 = c3.selectbox("User C", user_ids, index=user_ids.index(defaults[2]), key="pcbm_pg_u3")
+                selected = [u1, u2, u3]
+                duplicate = len(set(selected)) != 3
+                if duplicate:
+                    st.warning("Hãy chọn 3 user khác nhau.")
+                if st.button(
+                    "🔬 So sánh 3 user trên cùng tình huống",
+                    type="primary", use_container_width=True,
+                    disabled=duplicate, key="pcbm_pg_compare3"
+                ):
+                    try:
+                        # so_sanh_nguoi_dung() tự neo từng user vào lịch sử gần nhất nếu decision_time=None.
+                        # Nếu bỏ neo lịch sử, truyền decision_time hiện tại qua thu_nghiem_kich_ban từng user.
+                        if anchor_history:
+                            results = service.so_sanh_nguoi_dung(
+                                selected, parsed_title, base_level,
+                                estimated_minutes, priority, channel, None
+                            )
+                        else:
+                            results = [
+                                service.thu_nghiem_kich_ban(
+                                    uid, parsed_title, base_level, estimated_minutes,
+                                    priority, channel, None
+                                ) for uid in selected
+                            ]
+                        st.session_state["pcbm_pg_compare_results"] = results
+                    except Exception as e:
+                        st.error(f"Không so sánh được 3 user: {e}")
+
+                results = st.session_state.get("pcbm_pg_compare_results")
+                if results:
+                    st.markdown("#### 📊 Tổng hợp 3 user")
+                    _render_compare_summary(results)
+                    cols = st.columns(3)
+                    for col, result in zip(cols, results):
+                        with col:
+                            with st.container(border=True):
+                                _render_playground_result(result, compact=True)
+                    st.info(
+                        "💡 Điểm demo: cùng một nhiệm vụ và cùng Level ban đầu, PCBM có thể đưa ra "
+                        "khuyến nghị khác nhau vì lịch sử hành vi của mỗi user khác nhau."
+                    )
+        elif not user_ids:
+            st.warning("Chưa có user trong bảng pcbm_events để chạy Playground.")
 
     with tab_history:
         st.subheader("Lịch sử huấn luyện trong database")

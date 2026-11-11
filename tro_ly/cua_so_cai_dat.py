@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QSpinBox,
-    QVBoxLayout,
+    QVBoxLayout, QScrollArea, QWidget, QApplication,
 )
 
 from dich_vu.cai_dat_nguoi_dung import (
@@ -33,12 +33,33 @@ class CuaSoCaiDat(QDialog):
             "QPushButton:hover{background:#E7F2EF;}"
         )
 
+        screen = QApplication.primaryScreen()
+        geo = screen.availableGeometry() if screen else None
+        small_screen = bool(geo and (geo.width() <= 1024 or geo.height() <= 600))
+        if small_screen:
+            self.resize(min(760, max(620, geo.width() - 40)),
+                        min(440, max(360, geo.height() - 40)))
+        else:
+            self.resize(720, 620)
+
+        if small_screen:
+            self.setStyleSheet(
+                "QDialog{background:#F3F8F6;color:#20303A;}"
+                "QLabel{font:12px Arial;}"
+                "QComboBox,QSpinBox,QDoubleSpinBox{background:white;border:1px solid #C9DCD7;"
+                "border-radius:7px;padding:4px 7px;min-height:24px;font:12px Arial;}"
+                "QPushButton{background:white;border:1px solid #C9DCD7;border-radius:8px;"
+                "padding:5px 9px;font:600 12px Arial;}"
+                "QPushButton:hover{background:#E7F2EF;}"
+            )
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(22, 20, 22, 20)
-        root.setSpacing(14)
+        root.setContentsMargins(12 if small_screen else 22, 10 if small_screen else 20,
+                                12 if small_screen else 22, 10 if small_screen else 20)
+        root.setSpacing(8 if small_screen else 14)
 
         title = QLabel("⚙  Cài đặt thiết bị & giọng nói")
-        title.setStyleSheet("font:700 22px Arial;color:#23463E;")
+        title.setStyleSheet(f"font:700 {18 if small_screen else 22}px Arial;color:#23463E;")
         root.addWidget(title)
 
         note = QLabel(
@@ -46,15 +67,15 @@ class CuaSoCaiDat(QDialog):
             "Không cần khởi động lại ứng dụng."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("font:14px Arial;color:#617872;")
+        note.setStyleSheet(f"font:{12 if small_screen else 14}px Arial;color:#617872;")
         root.addWidget(note)
 
         panel = QFrame()
         panel.setStyleSheet("QFrame{background:#FFFFFF;border:1px solid #D8E6E2;border-radius:14px;}")
         form = QFormLayout(panel)
-        form.setContentsMargins(18, 18, 18, 18)
-        form.setHorizontalSpacing(20)
-        form.setVerticalSpacing(13)
+        form.setContentsMargins(10 if small_screen else 18, 10 if small_screen else 18, 10 if small_screen else 18, 10 if small_screen else 18)
+        form.setHorizontalSpacing(10 if small_screen else 20)
+        form.setVerticalSpacing(7 if small_screen else 13)
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.cbo_mic = QComboBox()
@@ -115,16 +136,31 @@ class CuaSoCaiDat(QDialog):
         self.spin_stall_timeout.setSuffix(" s")
         form.addRow("Stream-stall timeout:", self.spin_stall_timeout)
 
-        root.addWidget(panel)
+        # Nội dung cài đặt nằm trong vùng cuộn để màn hình robot nhỏ vẫn truy cập hết.
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(8 if small_screen else 12)
+        scroll_layout.addWidget(panel)
 
         quick = QHBoxLayout()
         quick.addWidget(QLabel("Buffer nhanh:"))
         for value in (250, 350, 450, 500):
             button = QPushButton(f"{value} ms")
+            if small_screen:
+                button.setMaximumHeight(30)
             button.clicked.connect(lambda checked=False, v=value: self.spin_buffer.setValue(v))
             quick.addWidget(button)
         quick.addStretch(1)
-        root.addLayout(quick)
+        scroll_layout.addLayout(quick)
+        scroll_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(scroll_content)
+        root.addWidget(scroll, 1)
 
         bottom = QHBoxLayout()
         self.btn_default = QPushButton("Khôi phục mặc định")

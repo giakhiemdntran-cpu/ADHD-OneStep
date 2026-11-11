@@ -22,18 +22,24 @@ DEFAULT_HELP_PROMPTS = {
         "Bạn là ai?",
         "Bạn có thể giúp mình những gì?",
         "Hôm nay bạn có thể hỗ trợ mình như thế nào?",
+        "Mình đang sử dụng người dùng nào?",
+        "Buddy đang dùng dữ liệu của ai?",
     ],
     "Tạo nhiệm vụ & chia nhỏ công việc": [
         "Nhắc mình làm bài tập lúc 7 giờ tối.",
         "Tạo nhiệm vụ hoàn thành báo cáo trước 4 giờ chiều.",
         "Giúp mình chia nhỏ việc dọn bàn học thành các bước.",
         "Mình cần hoàn thành bài thuyết trình trước ngày mai, hãy giúp mình lập các bước.",
+        "Mình thấy nhiệm vụ này quá lớn, giúp mình bắt đầu một bước thôi.",
     ],
     "Bắt đầu / hoàn thành / kiểm tra nhiệm vụ": [
         "Bắt đầu công việc hiện tại.",
         "Bây giờ mình cần làm việc gì?",
         "Mình đã hoàn thành bước này.",
         "Mình làm xong rồi.",
+        "Hôm nay mình có việc gì?",
+        "Việc tiếp theo của mình là gì?",
+        "Mình đang làm đến bước nào?",
     ],
     "Hoãn hoặc hủy nhiệm vụ": [
         "Nhắc lại cho mình sau 5 phút.",
@@ -41,44 +47,83 @@ DEFAULT_HELP_PROMPTS = {
         "Hủy nhiệm vụ hiện tại.",
         "Không cần nhắc việc này nữa.",
     ],
-    "Tập trung & ADHD coaching": [
+    "Tập trung, PCBM & ADHD coaching": [
         "Giúp mình bắt đầu việc này từng bước một.",
         "Mình đang bị mất tập trung, hãy giúp mình quay lại việc đang làm.",
         "Cho mình biết tiến độ luyện thói quen gần đây.",
-        "Mức hỗ trợ hiện tại của em là bao nhiêu?",
+        "Mức hỗ trợ hiện tại của mình là bao nhiêu?",
+        "Mức hỗ trợ hiện tại của mình là Level mấy?",
+        "Buddy đang đề xuất mức hỗ trợ nào cho mình?",
+        "Khả năng mình tự nhớ nhiệm vụ hiện tại là bao nhiêu?",
+        "Khả năng mình hoàn thành nhiệm vụ trong 30 phút là bao nhiêu?",
+        "Buddy đang dùng dữ liệu của người dùng nào?",
         "Tại sao Buddy lại đề xuất mức hỗ trợ này?",
-        "Được, Buddy có thể nhắc ít hơn.",
+        "Buddy dựa vào những hành vi nào để đưa ra khuyến nghị?",
+        "Tại sao mức hỗ trợ của mình lại tăng?",
+        "Tại sao mức hỗ trợ của mình lại giảm?",
+        "PCBM đang học những gì từ lịch sử của mình?",
+        "Buddy có thể giải thích quyết định của PCBM không?",
+        "Tỷ lệ tự nhớ gần đây của mình là bao nhiêu?",
+        "Mình đã trì hoãn bao nhiêu lần gần đây?",
+        "Độ trễ bắt đầu nhiệm vụ gần đây của mình là bao nhiêu?",
+        "Gần đây mình có hoàn thành nhiệm vụ đúng giờ không?",
+        "Mình có thường bắt đầu nhiệm vụ muộn không?",
+        "Mức nhắc này quá nhiều.",
         "Mức nhắc này vừa đủ.",
-        "Nhắc nhiều quá.",
-        "Em cần nhắc rõ hơn.",
-        "Lần này Buddy đánh giá thế nào?",
+        "Mình cần được nhắc nhiều hơn.",
+        "Được, Buddy có thể nhắc ít hơn.",
+        "Buddy giữ mức hỗ trợ này giúp mình.",
+        "Mình thấy lời nhắc này hơi mạnh.",
+        "Mình thấy lời nhắc này chưa đủ.",
+        "Mình đã sẵn sàng tự làm mà không cần nhắc chưa?",
+        "Buddy có thể giảm dần mức hỗ trợ cho mình không?",
+        "Gần đây mình có đang tự chủ hơn không?",
+        "Mình có đang bắt đầu nhiệm vụ nhanh hơn trước không?",
+        "Mình có đang ít trì hoãn hơn không?",
+        "Mình có đang cần ít lời nhắc hơn trước không?",
+        "Mình chưa biết bắt đầu từ đâu.",
+        "Giúp mình bắt đầu bằng một bước nhỏ thôi.",
+        "Mình đang bị kẹt, mình nên làm gì đầu tiên?",
+        "Mình muốn quay lại làm việc.",
     ],
     "Camera – kiểm tra vật dụng": [
         "Kiểm tra giúp mình đã có đủ đồ dùng học tập chưa.",
         "Bạn có thấy đủ các vật dụng cần thiết không?",
         "Kiểm tra bàn học giúp mình.",
+        "Kiểm tra giúp mình có sách Toán không.",
+        "Kiểm tra giúp mình có laptop không.",
+        "Kiểm tra giúp mình có thẻ học sinh không.",
+        "Kiểm tra giúp mình có bình nước không.",
     ],
     "Camera – tìm đồ vật": [
         "Tìm giúp mình cây bút ở đâu.",
         "Bạn có thấy quyển vở của mình không?",
         "Tìm giúp mình điện thoại.",
         "Cái kính của mình đâu rồi?",
+        "Tìm giúp mình quyển sách Toán.",
+        "Bạn có thấy laptop của mình không?",
     ],
     "Camera – xem lại hình": [
         "Cho mình xem lại hình vừa chụp.",
         "Hiển thị hình vừa rồi lâu hơn.",
+        "Mở hình camera gần nhất.",
     ],
     "Hội thoại tự nhiên": [
         "Mình hơi mệt, giúp mình chọn một việc nhỏ để bắt đầu.",
         "Giải thích ngắn gọn việc mình đang cần làm.",
         "Khuyến khích mình hoàn thành bước tiếp theo nhé.",
+        "Hôm nay mình hơi khó tập trung.",
+        "Mình thấy nhiệm vụ này quá khó.",
+        "Mình đang bị phân tâm.",
+        "Mình cảm thấy có quá nhiều việc phải làm.",
+        "Giúp mình sắp xếp lại công việc.",
     ],
 }
 
 
+
 DEFAULTS = {
     "active_user_id": "test_U036",
-    "pcbm_support_levels": {"test_U036": 1},
     "audio_input_device": None,
     "audio_output_device": None,
     "camera_source": VISION_CAMERA_SOURCE,
@@ -134,35 +179,29 @@ def _sanitize(data):
     result["vieneu_voice"] = str(result.get("vieneu_voice") or VIENEU_VOICE).strip() or VIENEU_VOICE
     result["active_user_id"] = str(result.get("active_user_id") or "test_U036").strip() or "test_U036"
 
-    raw_levels = result.get("pcbm_support_levels")
-    clean_levels = {}
-    if isinstance(raw_levels, dict):
-        for uid, level in raw_levels.items():
-            uid = str(uid).strip()
-            if not uid:
-                continue
-            try:
-                clean_levels[uid] = max(0, min(2, int(level)))
-            except (TypeError, ValueError):
-                clean_levels[uid] = 1
-    if "test_U036" not in clean_levels:
-        clean_levels["test_U036"] = 1
-    result["pcbm_support_levels"] = clean_levels
-
     raw_prompts = result.get("help_prompts")
-    prompts = {}
+
+    # Bắt đầu từ bộ prompt mặc định mới để các prompt PCBM mới luôn xuất hiện.
+    # Sau đó merge prompt người dùng đã lưu để không làm mất nội dung tự thêm/sửa.
+    prompts = deepcopy(DEFAULT_HELP_PROMPTS)
+
     if isinstance(raw_prompts, dict):
         for group, items in raw_prompts.items():
             group_name = str(group).strip()
             if not group_name or not isinstance(items, list):
                 continue
-            clean_items = []
+
+            if group_name == "Tập trung & ADHD coaching":
+                group_name = "Tập trung, PCBM & ADHD coaching"
+
+            target = prompts.setdefault(group_name, [])
+
             for item in items:
                 text = str(item).strip()
-                if text and text not in clean_items:
-                    clean_items.append(text)
-            prompts[group_name] = clean_items
-    result["help_prompts"] = prompts if prompts else deepcopy(DEFAULT_HELP_PROMPTS)
+                if text and text not in target:
+                    target.append(text)
+
+    result["help_prompts"] = prompts
     return result
 
 

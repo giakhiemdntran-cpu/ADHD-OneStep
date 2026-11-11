@@ -10,48 +10,34 @@ from cau_hinh import (
     PCBM_RECALL_MODEL,
     PCBM_COMPLETION_MODEL,
     PCBM_SAMPLE_DATA,
-    DEFAULT_USER_ID,
 )
 from dich_vu.co_so_du_lieu import lay_ket_noi_csdl
+from dich_vu.cai_dat_nguoi_dung import tai_cai_dat
 from huan_luyen_pcbm.xay_dung_dac_trung import xay_dung_dac_trung
+
 
 class DichVuPCBM:
     """Tích hợp mô hình hành vi nhận thức cá nhân PCBM với dữ liệu sự kiện và mô hình dự đoán."""
 
-    def __init__(self, user_id=DEFAULT_USER_ID):
-        self.active_user_id = user_id
-
+    def __init__(self):
         self.duoc_bat = bool(PCBM_ENABLED)
         self.ap_dung_muc_nhac = bool(PCBM_APPLY_PROMPT_LEVEL)
-
         self._mo_hinh_tu_nho = None
         self._mo_hinh_hoan_thanh = None
-
+        self.active_user_id = str(tai_cai_dat().get("active_user_id") or "test_U036").strip() or "test_U036"
         self.tai_lai_mo_hinh()
 
+
     def dat_nguoi_dung_hien_tai(self, user_id):
-        """Đổi người dùng hiện tại của PCBM."""
-        user_id = str(user_id or "").strip()
-
-        if not user_id:
-            user_id = DEFAULT_USER_ID
-
+        user_id = str(user_id or "test_U036").strip() or "test_U036"
         self.active_user_id = user_id
+        return self.active_user_id
 
-    def liet_ke_nguoi_dung(self):
-        with lay_ket_noi_csdl() as c:
-            rows = c.execute(
-                """
-                SELECT user_id, COUNT(*) AS total_events
-                FROM pcbm_events
-                WHERE user_id IS NOT NULL
-                AND TRIM(user_id) <> ''
-                GROUP BY user_id
-                ORDER BY total_events DESC, user_id ASC
-                """
-            ).fetchall()
+    def lay_nguoi_dung_hien_tai(self):
+        return self.active_user_id
 
-        return [dict(r) for r in rows]
+    def _user(self, user_id=None):
+        return str(user_id or self.active_user_id or "test_U036").strip() or "test_U036"
 
     def tai_lai_mo_hinh(self):
         self._mo_hinh_tu_nho = self._tai_mo_hinh(PCBM_RECALL_MODEL)
@@ -98,37 +84,18 @@ class DichVuPCBM:
             "last_training_run": dict(last_run) if last_run else None,
         }
 
-    def ghi_su_kien(
-        self,
-        event_type,
-        task_id=None,
-        occurrence_id=None,
-        data=None,
-        user_id=None,
-        timestamp=None
-    ):
-        if user_id is None:
-            user_id = self.active_user_id
-
+    def ghi_su_kien(self, event_type, task_id=None, occurrence_id=None, data=None,
+                  user_id=None, timestamp=None):
         if not self.duoc_bat:
             return None
-
+        user_id = self._user(user_id)
         now = timestamp or datetime.now().isoformat(timespec="seconds")
         data = data or {}
-
         with lay_ket_noi_csdl() as c:
             cur = c.execute(
-                """
-                INSERT INTO pcbm_events(
-                    user_id,
-                    task_id,
-                    occurrence_id,
-                    event_type,
-                    data_json,
-                    created_at
-                )
-                VALUES(?,?,?,?,?,?)
-                """,
+                """INSERT INTO pcbm_events(
+                    user_id, task_id, occurrence_id, event_type, data_json, created_at
+                ) VALUES(?,?,?,?,?,?)""",
                 (
                     user_id,
                     str(task_id) if task_id is not None else None,
@@ -138,7 +105,6 @@ class DichVuPCBM:
                     now,
                 )
             )
-
             return cur.lastrowid
 
     def lay_su_kien_gan_day(self, limit=200):
@@ -173,17 +139,10 @@ class DichVuPCBM:
         return out
 
     def _db_su_kien(self, user_id=None):
-        if user_id is None:
-            user_id = self.active_user_id
-
+        user_id = self._user(user_id)
         with lay_ket_noi_csdl() as c:
             rows = c.execute(
-                """
-                SELECT *
-                FROM pcbm_events
-                WHERE user_id=?
-                ORDER BY created_at, id
-                """,
+                "SELECT * FROM pcbm_events WHERE user_id=? ORDER BY created_at,id",
                 (user_id,)
             ).fetchall()
         events = []
@@ -260,14 +219,8 @@ class DichVuPCBM:
             print("[PCBM PREDICT ERROR]", e)
             return None
 
-    def de_xuat_muc_ho_tro(
-        self,
-        current_task,
-        base_prompt_level=1,
-        user_id=None
-    ):
-        if user_id is None:
-            user_id = self.active_user_id
+    def de_xuat_muc_ho_tro(self, current_task, base_prompt_level=1, user_id=None):
+        user_id = self._user(user_id)
         if not self.duoc_bat or not current_task or current_task.get("done"):
             return {
                 "enabled": self.duoc_bat,
@@ -367,6 +320,214 @@ class DichVuPCBM:
             )
 
         return output
+
+
+    # ------------------------------------------------------------------
+    # PCBM Playground / Admin demo helpers
+    # ------------------------------------------------------------------
+    def liet_ke_nguoi_dung(self, limit=200):
+        """Liệt kê user có dữ liệu PCBM để dùng trong màn hình Admin Playground."""
+        with lay_ket_noi_csdl() as c:
+            rows = c.execute(
+                """SELECT user_id, COUNT(*) AS event_count,
+                          MIN(created_at) AS first_event,
+                          MAX(created_at) AS last_event
+                   FROM pcbm_events
+                   GROUP BY user_id
+                   ORDER BY event_count DESC, user_id
+                   LIMIT ?""",
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def _pct(v):
+        return None if v is None else round(float(v) * 100.0, 1)
+
+    @staticmethod
+    def _ly_do_tieng_viet(code):
+        return {
+            "HIGH_RECALL_PROBABILITY_SUGGEST_FADE_ONE_LEVEL":
+                "Khả năng tự nhớ cao; có thể giảm một mức hỗ trợ và ưu tiên quan sát.",
+            "LOW_RECALL_PROBABILITY_SUGGEST_MORE_SUPPORT":
+                "Khả năng tự nhớ thấp; nên tăng một mức hỗ trợ để nhắc rõ hơn.",
+            "KEEP_BASE_LEVEL_ADVISORY_ONLY":
+                "Khả năng tự nhớ ở vùng trung gian; giữ mức hỗ trợ hiện tại.",
+        }.get(code, "Giữ mức hỗ trợ hiện tại và tiếp tục quan sát.")
+
+    def thoi_diem_demo_theo_lich_su(self, user_ids):
+        """Neo thời điểm demo ngay sau sự kiện mới nhất của các user đã chọn.
+
+        Hữu ích với bộ dữ liệu mô phỏng lịch sử: các feature 1/3/7 ngày vẫn có ý nghĩa
+        thay vì bị rỗng chỉ vì ngày hiện tại cách xa ngày cuối của dataset.
+        """
+        ids = [str(x).strip() for x in (user_ids or []) if str(x).strip()]
+        if not ids:
+            return None
+        marks = ",".join("?" for _ in ids)
+        with lay_ket_noi_csdl() as c:
+            row = c.execute(
+                f"SELECT MAX(created_at) AS last_time FROM pcbm_events WHERE user_id IN ({marks})",
+                ids,
+            ).fetchone()
+        if not row or not row["last_time"]:
+            return None
+        try:
+            return pd.Timestamp(row["last_time"]).to_pydatetime() + timedelta(minutes=1)
+        except Exception:
+            return None
+
+    def thu_nghiem_kich_ban(self, user_id, title, base_prompt_level=1,
+                            estimated_minutes=30, priority=1, channel="buddy",
+                            decision_time=None):
+        """Chạy thử PCBM cho một user mà KHÔNG ghi event/prediction vào DB.
+
+        Mục đích: Admin Playground / demo trước giám khảo. Toàn bộ feature vẫn dùng
+        xay_dung_dac_trung() và model thật, nhưng task/decision chỉ tồn tại trong RAM.
+        """
+        if not user_id:
+            raise ValueError("Thiếu user_id")
+        title = (title or "Nhiệm vụ thử nghiệm").strip()
+        base_prompt_level = max(0, min(int(base_prompt_level), 2))
+        try:
+            estimated_minutes = int(estimated_minutes or 30)
+        except Exception:
+            estimated_minutes = 30
+        estimated_minutes = max(1, min(estimated_minutes, 480))
+        try:
+            priority = int(priority or 1)
+        except Exception:
+            priority = 1
+        priority = max(1, min(priority, 3))
+        events = self._db_su_kien(user_id)
+        # Dữ liệu import có thể chứa timestamp kèm timezone. Playground phải dùng
+        # cùng kiểu datetime để tránh so sánh aware/naive trong feature builder.
+        if decision_time is None:
+            tz = next((e["timestamp"].tzinfo for e in events if getattr(e["timestamp"], "tzinfo", None) is not None), None)
+            decision_time = datetime.now(tz=tz) if tz is not None else datetime.now()
+        elif events:
+            sample_tz = next((e["timestamp"].tzinfo for e in events if getattr(e["timestamp"], "tzinfo", None) is not None), None)
+            if sample_tz is not None and decision_time.tzinfo is None:
+                decision_time = decision_time.replace(tzinfo=sample_tz)
+            elif sample_tz is None and decision_time.tzinfo is not None:
+                decision_time = decision_time.replace(tzinfo=None)
+
+        task_id = f"PLAYGROUND::{self._suy_ra_nhiem_vu_loai(title)}"
+        occurrence_id = f"PLAY::{decision_time.strftime('%Y%m%d%H%M%S')}"
+
+        synthetic_created = {
+            "event_id": "PLAY_TASK_CREATED",
+            "user_id": user_id,
+            "task_id": task_id,
+            "occurrence_id": occurrence_id,
+            "timestamp": decision_time - timedelta(seconds=2),
+            "event_type": "TASK_CREATED",
+            "data": {
+                "title": title,
+                "task_type": self._suy_ra_nhiem_vu_loai(title),
+                "priority": priority,
+                "estimated_minutes": estimated_minutes,
+            },
+        }
+        events = list(events) + [synthetic_created]
+
+        decision = {
+            "event_id": "PLAY_DECISION",
+            "user_id": user_id,
+            "task_id": task_id,
+            "occurrence_id": occurrence_id,
+            "timestamp": decision_time,
+            "event_type": "REMINDER_SENT",
+            "data": {
+                "prompt_level": base_prompt_level,
+                "reminder_type": "generic" if base_prompt_level <= 1 else "explicit",
+                "channel": channel or "buddy",
+            },
+        }
+        recall_decision = dict(decision)
+        recall_decision["data"] = dict(decision["data"])
+        recall_decision["data"]["prompt_level"] = 1
+        recall_decision["data"]["reminder_type"] = "generic"
+
+        recall_features = xay_dung_dac_trung(events, recall_decision)
+        completion_features = xay_dung_dac_trung(events, decision)
+        recall_p = self._du_doan_xac_suat(self._mo_hinh_tu_nho, recall_features)
+        completion_p = self._du_doan_xac_suat(self._mo_hinh_hoan_thanh, completion_features)
+
+        recommended = base_prompt_level
+        reason = "KEEP_BASE_LEVEL_ADVISORY_ONLY"
+        if recall_p is not None:
+            if recall_p >= 0.80 and recommended > 0:
+                recommended -= 1
+                reason = "HIGH_RECALL_PROBABILITY_SUGGEST_FADE_ONE_LEVEL"
+            elif recall_p < 0.45 and recommended < 2:
+                recommended += 1
+                reason = "LOW_RECALL_PROBABILITY_SUGGEST_MORE_SUPPORT"
+
+        profile = {
+            "event_count": recall_features.get("event_count_before"),
+            "history_days": round(float(recall_features.get("history_days") or 0), 1),
+            "cold_start": bool(recall_features.get("is_cold_start")),
+            "recall_rate_1d": self._pct(recall_features.get("recall_rate_1d")),
+            "recall_rate_3d": self._pct(recall_features.get("recall_rate_3d")),
+            "recall_rate_7d": self._pct(recall_features.get("recall_rate_7d")),
+            "completion_rate_7d": self._pct(recall_features.get("completion_rate_7d")),
+            "completion_rate_30d": self._pct(recall_features.get("completion_rate_30d")),
+            "snooze_rate_7d": self._pct(recall_features.get("snooze_rate_7d")),
+            "forget_rate_7d": self._pct(recall_features.get("forget_rate_7d")),
+            "avg_start_delay_7d": None if recall_features.get("avg_start_delay_7d") is None else round(float(recall_features["avg_start_delay_7d"]), 1),
+            "recall_success_streak": recall_features.get("recall_success_streak", 0),
+            "recall_failure_streak": recall_features.get("recall_failure_streak", 0),
+            "last_recall_feedback": recall_features.get("last_recall_feedback"),
+        }
+
+        return {
+            "user_id": user_id,
+            "scenario": {
+                "title": title,
+                "task_type": recall_features.get("task_type"),
+                "estimated_minutes": estimated_minutes,
+                "priority": priority,
+                "channel": channel,
+                "base_prompt_level": base_prompt_level,
+                "decision_time": decision_time.isoformat(timespec="seconds"),
+            },
+            "profile": profile,
+            "prediction": {
+                "recall_probability": recall_p,
+                "completion_30m_probability": completion_p,
+                "recall_percent": self._pct(recall_p),
+                "completion_30m_percent": self._pct(completion_p),
+                "base_prompt_level": base_prompt_level,
+                "recommended_prompt_level": recommended,
+                "reason_code": reason,
+                "reason_vi": self._ly_do_tieng_viet(reason),
+                "applied": False,
+            },
+            "features": {
+                "recall": recall_features,
+                "completion": completion_features,
+            },
+        }
+
+    def so_sanh_nguoi_dung(self, user_ids, title, base_prompt_level=1,
+                           estimated_minutes=30, priority=1, channel="buddy",
+                           decision_time=None):
+        ids = [str(x).strip() for x in (user_ids or []) if str(x).strip()]
+        if len(ids) != 3:
+            raise ValueError("Cần chọn đúng 3 user để so sánh.")
+        results = []
+        for uid in ids:
+            # Với dữ liệu mô phỏng lịch sử, neo từng user ngay sau sự kiện mới nhất
+            # giúp so sánh đúng "trạng thái gần nhất" của mỗi hồ sơ.
+            t = decision_time or self.thoi_diem_demo_theo_lich_su([uid])
+            results.append(
+                self.thu_nghiem_kich_ban(
+                    uid, title, base_prompt_level, estimated_minutes,
+                    priority, channel, t
+                )
+            )
+        return results
 
     def huan_luyen_mau_mo_hinh(self):
         from huan_luyen_pcbm.huan_luyen_mo_hinh import chay_chuong_trinh as _unused  # kiểm tra lại kết quả nhập dữ liệu
