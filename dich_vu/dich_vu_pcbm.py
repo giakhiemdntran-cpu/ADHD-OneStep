@@ -10,6 +10,7 @@ from cau_hinh import (
     PCBM_RECALL_MODEL,
     PCBM_COMPLETION_MODEL,
     PCBM_SAMPLE_DATA,
+    DEFAULT_USER_ID,
 )
 from dich_vu.co_so_du_lieu import lay_ket_noi_csdl
 from dich_vu.cai_dat_nguoi_dung import tai_cai_dat
@@ -19,17 +20,30 @@ from huan_luyen_pcbm.xay_dung_dac_trung import xay_dung_dac_trung
 class DichVuPCBM:
     """Tích hợp mô hình hành vi nhận thức cá nhân PCBM với dữ liệu sự kiện và mô hình dự đoán."""
 
-    def __init__(self):
+    def __init__(self, user_id=None):
         self.duoc_bat = bool(PCBM_ENABLED)
         self.ap_dung_muc_nhac = bool(PCBM_APPLY_PROMPT_LEVEL)
         self._mo_hinh_tu_nho = None
         self._mo_hinh_hoan_thanh = None
-        self.active_user_id = str(tai_cai_dat().get("active_user_id") or "test_U036").strip() or "test_U036"
+
+        # Tương thích cả hai cách gọi:
+        #   DichVuPCBM()
+        #   DichVuPCBM(user_id="user01")
+        saved_user_id = str(
+            tai_cai_dat().get("active_user_id") or DEFAULT_USER_ID
+        ).strip() or DEFAULT_USER_ID
+
+        self.active_user_id = str(
+            user_id or saved_user_id or DEFAULT_USER_ID
+        ).strip() or DEFAULT_USER_ID
+
         self.tai_lai_mo_hinh()
 
 
     def dat_nguoi_dung_hien_tai(self, user_id):
-        user_id = str(user_id or "test_U036").strip() or "test_U036"
+        user_id = str(
+            user_id or DEFAULT_USER_ID
+        ).strip() or DEFAULT_USER_ID
         self.active_user_id = user_id
         return self.active_user_id
 
@@ -37,7 +51,9 @@ class DichVuPCBM:
         return self.active_user_id
 
     def _user(self, user_id=None):
-        return str(user_id or self.active_user_id or "test_U036").strip() or "test_U036"
+        return str(
+            user_id or self.active_user_id or DEFAULT_USER_ID
+        ).strip() or DEFAULT_USER_ID
 
     def tai_lai_mo_hinh(self):
         self._mo_hinh_tu_nho = self._tai_mo_hinh(PCBM_RECALL_MODEL)

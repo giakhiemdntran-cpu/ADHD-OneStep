@@ -1,6 +1,11 @@
 from pathlib import Path
 import os
 
+DEFAULT_USER_ID = os.getenv(
+    "ONESTEP_DEFAULT_USER",
+    "user01"
+)
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "storage" / "onestep.db"
 FACE_DIR = BASE_DIR / "faces"
@@ -11,12 +16,8 @@ PORT = 5000
 DEFAULT_DELAY_MINUTES = 10
 REMINDER_CHECK_MS = 2000
 
-# ---- Giao diện compact cho màn hình robot ----
-# Bật mặc định để giao diện vừa màn hình nhỏ (ví dụ 800x480).
-# Đặt ROBOT_COMPACT_UI=0 nếu chạy trên màn hình desktop lớn.
-ROBOT_COMPACT_UI = os.getenv("ROBOT_COMPACT_UI", "1").lower() in {"1", "true", "yes", "on"}
-ROBOT_UI_TARGET_WIDTH = int(os.getenv("ROBOT_UI_TARGET_WIDTH", "800"))
-ROBOT_UI_TARGET_HEIGHT = int(os.getenv("ROBOT_UI_TARGET_HEIGHT", "480"))
+# Database cho người dùng: DEFAULT_USER_ID được khai báo ở đầu file.
+
 
 # Giọng nói / VAD thích nghi
 AUTO_LISTEN = True
@@ -124,3 +125,4 @@ PCBM_APPLY_PROMPT_LEVEL = os.getenv("PCBM_APPLY_PROMPT_LEVEL", "0").lower() in {
 PCBM_SAMPLE_DATA = BASE_DIR / "data" / "sample_events.jsonl"
 PCBM_RECALL_MODEL = BASE_DIR / "models" / "pcbm_recall.joblib"
 PCBM_COMPLETION_MODEL = BASE_DIR / "models" / "pcbm_completion.joblib"
+
