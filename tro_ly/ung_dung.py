@@ -1062,10 +1062,24 @@ def chay_tro_ly():
     app = QApplication(sys.argv)
     w = CuaSoTroLy()
 
-    # Robot mode: dùng fullscreen thật để window manager không co cửa sổ
-    # và không làm lộ desktop/dock ở các cạnh. Các control phía trên đã
-    # được thu nhỏ và lùi vào trong nên vẫn nằm trong vùng an toàn.
-    w.showFullScreen()
-    w.raise_()
-    w.activateWindow()
+    def ep_fullscreen():
+        """Ép cửa sổ Buddy phủ toàn bộ màn hình robot."""
+        screen = app.primaryScreen()
+        if screen is not None:
+            geo = screen.geometry()
+            w.setGeometry(geo)
+
+        # Kiosk-like window: không viền và luôn nằm trên terminal phía sau.
+        w.setWindowFlag(Qt.FramelessWindowHint, True)
+        w.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+
+        w.showFullScreen()
+        w.raise_()
+        w.activateWindow()
+
+    # Gọi ngay và gọi lại sau khi event loop/window manager ổn định.
+    ep_fullscreen()
+    QTimer.singleShot(150, ep_fullscreen)
+    QTimer.singleShot(800, ep_fullscreen)
+
     sys.exit(app.exec())
