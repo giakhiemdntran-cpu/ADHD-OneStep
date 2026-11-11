@@ -166,17 +166,14 @@ class CuaSoTroLy(QWidget):
         top_bar.addWidget(nhan_user)
 
         self.chon_nguoi_dung = QComboBox()
-        self.chon_nguoi_dung.setEditable(False)
-        self.chon_nguoi_dung.setInsertPolicy(QComboBox.NoInsert)
-        self.chon_nguoi_dung.setFixedHeight(40)
-        self.chon_nguoi_dung.setMinimumWidth(150)
-        self.chon_nguoi_dung.setMaximumWidth(190)
+        self.chon_nguoi_dung.setFixedHeight(44)
+        self.chon_nguoi_dung.setMinimumWidth(170)
         self.chon_nguoi_dung.setToolTip("Chọn người dùng hiện tại cho Robot Buddy")
         self.chon_nguoi_dung.setStyleSheet(
-            "QComboBox{background:#FFFFFF;border:1px solid #AFCFC7;border-radius:12px;"
-            "padding:6px 10px;font:700 16px Arial;color:#23463E;}"
+            "QComboBox{background:#FFFFFF;border:1px solid #AFCFC7;border-radius:14px;"
+            "padding:7px 12px;font:700 17px Arial;color:#23463E;}"
             "QComboBox:hover{border-color:#2F7D6D;}"
-            "QComboBox::drop-down{border:none;width:24px;}"
+            "QComboBox::drop-down{border:none;width:28px;}"
         )
         try:
             user_ids = [
@@ -195,33 +192,39 @@ class CuaSoTroLy(QWidget):
 
         idx_user = self.chon_nguoi_dung.findText(self.active_user_id)
         self.chon_nguoi_dung.setCurrentIndex(idx_user if idx_user >= 0 else 0)
+
+        # Connect sau khi populate để tránh phát signal khi đang khởi tạo.
+        self.chon_nguoi_dung.currentTextChanged.connect(
+            self.doi_nguoi_dung_hien_tai
+        )
         top_bar.addWidget(self.chon_nguoi_dung)
 
-        # Bố cục compact như v10.6: chọn user rồi bấm "Chọn".
-        self.nut_chon_user = QPushButton("✓ Xác nhận")
-        self.nut_chon_user.setCursor(Qt.PointingHandCursor)
-        self.nut_chon_user.setFixedHeight(40)
-        self.nut_chon_user.setFixedWidth(110)
-        self.nut_chon_user.setToolTip(
-            "Xác nhận đổi sang người dùng đang chọn và tải lại dữ liệu"
+        # Nút refresh thủ công: hữu ích khi demo / đổi user.
+        self.nut_refresh_user = QPushButton("↻ Refresh")
+        self.nut_refresh_user.setCursor(Qt.PointingHandCursor)
+        self.nut_refresh_user.setFixedHeight(44)
+        self.nut_refresh_user.setMinimumWidth(100)
+        self.nut_refresh_user.setToolTip(
+            "Tải lại dữ liệu PCBM và nhiệm vụ của người dùng hiện tại"
         )
-        self.nut_chon_user.setStyleSheet(
-            "QPushButton{background:#2F6F61;border:1px solid #2F6F61;"
-            "border-radius:12px;padding:5px 10px;font:700 15px Arial;color:#FFFFFF;}"
-            "QPushButton:hover{background:#285E53;}"
-            "QPushButton:pressed{background:#214F46;}"
+        self.nut_refresh_user.setStyleSheet(
+            "QPushButton{background:#FFFFFF;border:1px solid #AFCFC7;"
+            "border-radius:14px;padding:7px 12px;font:600 16px Arial;"
+            "color:#2F6F61;}"
+            "QPushButton:hover{background:#E6F3F0;border-color:#2F7D6D;}"
+            "QPushButton:pressed{background:#D8ECE7;}"
         )
-        self.nut_chon_user.clicked.connect(self.xac_nhan_doi_nguoi_dung)
-        top_bar.addWidget(self.nut_chon_user)
+        self.nut_refresh_user.clicked.connect(self.refresh_active_user)
+        top_bar.addWidget(self.nut_refresh_user)
 
         top_bar.addStretch(1)
         self.nut_chuyen_giao_dien = QPushButton("💬  Chat")
         self.nut_chuyen_giao_dien.setCursor(Qt.PointingHandCursor)
-        self.nut_chuyen_giao_dien.setFixedHeight(40)
-        self.nut_chuyen_giao_dien.setMinimumWidth(96)
+        self.nut_chuyen_giao_dien.setFixedHeight(44)
+        self.nut_chuyen_giao_dien.setMinimumWidth(120)
         self.nut_chuyen_giao_dien.setStyleSheet(
             "QPushButton{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:20px;"
-            "padding:6px 12px;font:600 16px Arial;color:#20303A;}"
+            "padding:7px 18px;font:600 18px Arial;color:#20303A;}"
             "QPushButton:hover{background:#E6F3F0;}"
             "QPushButton:pressed{background:#D8ECE7;}"
         )
@@ -232,12 +235,12 @@ class CuaSoTroLy(QWidget):
         # Nút Settings: thiết bị audio/camera + buffer VieNeu.
         self.nut_cai_dat = QPushButton("⚙  Cài đặt")
         self.nut_cai_dat.setCursor(Qt.PointingHandCursor)
-        self.nut_cai_dat.setFixedHeight(40)
-        self.nut_cai_dat.setMinimumWidth(102)
+        self.nut_cai_dat.setFixedHeight(44)
+        self.nut_cai_dat.setMinimumWidth(122)
         self.nut_cai_dat.setToolTip("Cài đặt thiết bị & TTS (F2)")
         self.nut_cai_dat.setStyleSheet(
             "QPushButton{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:20px;"
-            "padding:6px 12px;font:600 16px Arial;color:#20303A;}"
+            "padding:7px 18px;font:600 18px Arial;color:#20303A;}"
             "QPushButton:hover{background:#E6F3F0;}"
             "QPushButton:pressed{background:#D8ECE7;}"
         )
@@ -247,12 +250,12 @@ class CuaSoTroLy(QWidget):
         # Nút Trợ giúp: danh mục prompt mẫu theo từng tình huống.
         self.nut_tro_giup = QPushButton("❓  Trợ giúp")
         self.nut_tro_giup.setCursor(Qt.PointingHandCursor)
-        self.nut_tro_giup.setFixedHeight(40)
-        self.nut_tro_giup.setMinimumWidth(106)
+        self.nut_tro_giup.setFixedHeight(44)
+        self.nut_tro_giup.setMinimumWidth(122)
         self.nut_tro_giup.setToolTip("Xem câu nói mẫu với Buddy (F3)")
         self.nut_tro_giup.setStyleSheet(
             "QPushButton{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:20px;"
-            "padding:6px 12px;font:600 16px Arial;color:#20303A;}"
+            "padding:7px 18px;font:600 18px Arial;color:#20303A;}"
             "QPushButton:hover{background:#E6F3F0;}"
             "QPushButton:pressed{background:#D8ECE7;}"
         )
@@ -262,8 +265,8 @@ class CuaSoTroLy(QWidget):
         # Nút thoát luôn hiển thị ở góc phải, cạnh nút đổi giao diện.
         self.nut_thoat = QPushButton("⏻  Thoát")
         self.nut_thoat.setCursor(Qt.PointingHandCursor)
-        self.nut_thoat.setFixedHeight(40)
-        self.nut_thoat.setMinimumWidth(92)
+        self.nut_thoat.setFixedHeight(44)
+        self.nut_thoat.setMinimumWidth(112)
         self.nut_thoat.setToolTip("Tắt OneStep Buddy (Ctrl+Q)")
         self.nut_thoat.setStyleSheet(
             "QPushButton{background:#FFF4F2;border:1px solid #E9BBB3;border-radius:20px;"
@@ -330,7 +333,7 @@ class CuaSoTroLy(QWidget):
         self.nhan_muc_ho_tro.setWordWrap(True)
         self.nhan_muc_ho_tro.setStyleSheet(
             "QLabel{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:14px;"
-            "font:600 16px Arial;padding:8px 14px;margin:0 34px 10px;color:#315C52;}"
+            "font:600 17px Arial;padding:10px 18px;margin:0 60px 14px;color:#315C52;}"
         )
         lay.addWidget(self.nhan_muc_ho_tro)
         self.ngan_xep_giao_dien.addWidget(self.trang_khuon_mat)
@@ -470,17 +473,6 @@ class CuaSoTroLy(QWidget):
         if AUTO_LISTEN:
             QTimer.singleShot(900, self.lang_nghe)
 
-    def xac_nhan_doi_nguoi_dung(self):
-        """Chỉ đổi active user khi người dùng bấm nút Xác nhận."""
-        if not hasattr(self, "chon_nguoi_dung"):
-            return
-
-        user_id = str(self.chon_nguoi_dung.currentText() or "").strip()
-        if not user_id:
-            return
-
-        self.doi_nguoi_dung_hien_tai(user_id)
-
     def doi_nguoi_dung_hien_tai(self, user_id):
         """Đổi active user, lưu cấu hình và tự động refresh giao diện."""
         user_id = str(user_id or "").strip()
@@ -616,15 +608,14 @@ class CuaSoTroLy(QWidget):
                 huong = "= giữ mức"
                 bg, border, fg = "#EEF5FB", "#BDD4E8", "#315E7D"
 
-            text = (
-                f"👤 {uid}   •   Level {base_level} → PCBM: Level {rec} ({huong})\n"
-                f"Recall: {recall}   •   Completion≤30m: {completion}{cold}"
-            )
+            text = (f"👤 {uid}   •   Hỗ trợ hiện tại: Level {base_level}   →   "
+                    f"PCBM đề xuất: Level {rec} ({huong})   •   "
+                    f"Recall {recall}   •   Completion≤30m {completion}{cold}")
             self.nhan_muc_ho_tro.setText(text)
             self.nhan_muc_ho_tro.setToolTip(pred.get("reason_vi") or "")
             self.nhan_muc_ho_tro.setStyleSheet(
                 f"QLabel{{background:{bg};border:1px solid {border};border-radius:14px;"
-                f"font:600 16px Arial;padding:8px 14px;margin:0 34px 10px;color:{fg};}}"
+                f"font:600 17px Arial;padding:10px 18px;margin:0 60px 14px;color:{fg};}}"
             )
             if hasattr(self, "nhan_chat_muc_ho_tro"):
                 self.nhan_chat_muc_ho_tro.setText(

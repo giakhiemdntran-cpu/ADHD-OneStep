@@ -1,0 +1,115 @@
+{
+  "active_user_id": "test_U019",
+  "audio_input_device": null,
+  "audio_output_device": null,
+  "camera_source": "usb",
+  "camera_id": 0,
+  "csi_sensor_id": 0,
+  "vieneu_voice": "Mai Anh",
+  "vieneu_start_buffer_ms": 350,
+  "vieneu_first_audio_timeout": 2.0,
+  "vieneu_stream_stall_timeout": 1.5,
+  "vieneu_output_blocksize": 2048,
+  "help_prompts": {
+    "Bắt đầu & tìm hiểu Buddy": [
+      "Bạn là ai?",
+      "Bạn có thể giúp mình những gì?",
+      "Hôm nay bạn có thể hỗ trợ mình như thế nào?",
+      "Mình đang sử dụng người dùng nào?",
+      "Buddy đang dùng dữ liệu của ai?"
+    ],
+    "Tạo nhiệm vụ & chia nhỏ công việc": [
+      "Nhắc mình làm bài tập lúc 7 giờ tối.",
+      "Tạo nhiệm vụ hoàn thành báo cáo trước 4 giờ chiều.",
+      "Giúp mình chia nhỏ việc dọn bàn học thành các bước.",
+      "Mình cần hoàn thành bài thuyết trình trước ngày mai, hãy giúp mình lập các bước.",
+      "Mình thấy nhiệm vụ này quá lớn, giúp mình bắt đầu một bước thôi."
+    ],
+    "Bắt đầu / hoàn thành / kiểm tra nhiệm vụ": [
+      "Bắt đầu công việc hiện tại.",
+      "Bây giờ mình cần làm việc gì?",
+      "Mình đã hoàn thành bước này.",
+      "Mình làm xong rồi.",
+      "Hôm nay mình có việc gì?",
+      "Việc tiếp theo của mình là gì?",
+      "Mình đang làm đến bước nào?"
+    ],
+    "Hoãn hoặc hủy nhiệm vụ": [
+      "Nhắc lại cho mình sau 5 phút.",
+      "Để việc này sau 15 phút nhé.",
+      "Hủy nhiệm vụ hiện tại.",
+      "Không cần nhắc việc này nữa."
+    ],
+    "Tập trung, PCBM & ADHD coaching": [
+      "Giúp mình bắt đầu việc này từng bước một.",
+      "Mình đang bị mất tập trung, hãy giúp mình quay lại việc đang làm.",
+      "Cho mình biết tiến độ luyện thói quen gần đây.",
+      "Mức hỗ trợ hiện tại của mình là bao nhiêu?",
+      "Mức hỗ trợ hiện tại của mình là Level mấy?",
+      "Buddy đang đề xuất mức hỗ trợ nào cho mình?",
+      "Khả năng mình tự nhớ nhiệm vụ hiện tại là bao nhiêu?",
+      "Khả năng mình hoàn thành nhiệm vụ trong 30 phút là bao nhiêu?",
+      "Buddy đang dùng dữ liệu của người dùng nào?",
+      "Tại sao Buddy lại đề xuất mức hỗ trợ này?",
+      "Buddy dựa vào những hành vi nào để đưa ra khuyến nghị?",
+      "Tại sao mức hỗ trợ của mình lại tăng?",
+      "Tại sao mức hỗ trợ của mình lại giảm?",
+      "PCBM đang học những gì từ lịch sử của mình?",
+      "Buddy có thể giải thích quyết định của PCBM không?",
+      "Tỷ lệ tự nhớ gần đây của mình là bao nhiêu?",
+      "Mình đã trì hoãn bao nhiêu lần gần đây?",
+      "Độ trễ bắt đầu nhiệm vụ gần đây của mình là bao nhiêu?",
+      "Gần đây mình có hoàn thành nhiệm vụ đúng giờ không?",
+      "Mình có thường bắt đầu nhiệm vụ muộn không?",
+      "Mức nhắc này quá nhiều.",
+      "Mức nhắc này vừa đủ.",
+      "Mình cần được nhắc nhiều hơn.",
+      "Được, Buddy có thể nhắc ít hơn.",
+      "Buddy giữ mức hỗ trợ này giúp mình.",
+      "Mình thấy lời nhắc này hơi mạnh.",
+      "Mình thấy lời nhắc này chưa đủ.",
+      "Mình đã sẵn sàng tự làm mà không cần nhắc chưa?",
+      "Buddy có thể giảm dần mức hỗ trợ cho mình không?",
+      "Gần đây mình có đang tự chủ hơn không?",
+      "Mình có đang bắt đầu nhiệm vụ nhanh hơn trước không?",
+      "Mình có đang ít trì hoãn hơn không?",
+      "Mình có đang cần ít lời nhắc hơn trước không?",
+      "Mình chưa biết bắt đầu từ đâu.",
+      "Giúp mình bắt đầu bằng một bước nhỏ thôi.",
+      "Mình đang bị kẹt, mình nên làm gì đầu tiên?",
+      "Mình muốn quay lại làm việc."
+    ],
+    "Camera – kiểm tra vật dụng": [
+      "Kiểm tra giúp mình đã có đủ đồ dùng học tập chưa.",
+      "Bạn có thấy đủ các vật dụng cần thiết không?",
+      "Kiểm tra bàn học giúp mình.",
+      "Kiểm tra giúp mình có sách Toán không.",
+      "Kiểm tra giúp mình có laptop không.",
+      "Kiểm tra giúp mình có thẻ học sinh không.",
+      "Kiểm tra giúp mình có bình nước không."
+    ],
+    "Camera – tìm đồ vật": [
+      "Tìm giúp mình cây bút ở đâu.",
+      "Bạn có thấy quyển vở của mình không?",
+      "Tìm giúp mình điện thoại.",
+      "Cái kính của mình đâu rồi?",
+      "Tìm giúp mình quyển sách Toán.",
+      "Bạn có thấy laptop của mình không?"
+    ],
+    "Camera – xem lại hình": [
+      "Cho mình xem lại hình vừa chụp.",
+      "Hiển thị hình vừa rồi lâu hơn.",
+      "Mở hình camera gần nhất."
+    ],
+    "Hội thoại tự nhiên": [
+      "Mình hơi mệt, giúp mình chọn một việc nhỏ để bắt đầu.",
+      "Giải thích ngắn gọn việc mình đang cần làm.",
+      "Khuyến khích mình hoàn thành bước tiếp theo nhé.",
+      "Hôm nay mình hơi khó tập trung.",
+      "Mình thấy nhiệm vụ này quá khó.",
+      "Mình đang bị phân tâm.",
+      "Mình cảm thấy có quá nhiều việc phải làm.",
+      "Giúp mình sắp xếp lại công việc."
+    ]
+  }
+}
