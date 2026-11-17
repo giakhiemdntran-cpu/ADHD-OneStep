@@ -1,1 +1,2 @@
-ADHD OneStep v10.6
+ADHD OneStep v10.9.2
+UI fix: compact support header + recenter after Demo mode

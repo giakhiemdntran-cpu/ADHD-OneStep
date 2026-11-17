@@ -1,0 +1,97 @@
+[
+  {
+    "user_id": "DEMO_STABLE",
+    "label": "Hồ sơ A - Ổn định",
+    "description": "Tự nhớ tốt, phù hợp để minh họa giảm hỗ trợ.",
+    "source_profile": "U036",
+    "base_prompt_level": 1,
+    "habit_summary": "Thường tự nhớ tốt, bắt đầu nhanh, học hiệu quả vào buổi tối.",
+    "daily_plan": [
+      {
+        "time": "06:45",
+        "title": "Chuẩn bị cặp",
+        "coach": "Tự kiểm tra checklist; Buddy chỉ quan sát."
+      },
+      {
+        "time": "16:30",
+        "title": "Ôn bài 25 phút",
+        "coach": "Gợi ý nhẹ, ưu tiên tự bắt đầu."
+      },
+      {
+        "time": "19:00",
+        "title": "Làm bài Toán 30 phút",
+        "coach": "Level 1: gợi ý chung, tránh nhắc trực tiếp."
+      },
+      {
+        "time": "21:15",
+        "title": "Chuẩn bị ngày mai",
+        "coach": "Tóm tắt nhanh và để người dùng tự hoàn tất."
+      }
+    ]
+  },
+  {
+    "user_id": "DEMO_BALANCED",
+    "label": "Hồ sơ B - Trung bình",
+    "description": "Hành vi tương đối ổn định, phù hợp để minh họa giữ mức hỗ trợ.",
+    "source_profile": "U010",
+    "base_prompt_level": 1,
+    "habit_summary": "Thỉnh thoảng trì hoãn; phản hồi tốt với gợi ý ngắn và chia nhỏ nhiệm vụ.",
+    "daily_plan": [
+      {
+        "time": "06:40",
+        "title": "Chuẩn bị cặp",
+        "coach": "Checklist ngắn 3 mục."
+      },
+      {
+        "time": "16:15",
+        "title": "Ôn bài 20 phút",
+        "coach": "Nhắc trước 5 phút để chuẩn bị."
+      },
+      {
+        "time": "19:00",
+        "title": "Làm bài Toán",
+        "coach": "Chia thành bước 1: mở vở và làm câu đầu."
+      },
+      {
+        "time": "21:00",
+        "title": "Kiểm tra việc ngày mai",
+        "coach": "Xác nhận còn việc nào chưa xong."
+      }
+    ]
+  },
+  {
+    "user_id": "DEMO_NEEDS_SUPPORT",
+    "label": "Hồ sơ C - Cần hỗ trợ",
+    "description": "Dễ quên/trì hoãn hơn, phù hợp để minh họa tăng hỗ trợ.",
+    "source_profile": "U001",
+    "base_prompt_level": 1,
+    "habit_summary": "Dễ quên và trì hoãn; phù hợp với nhắc rõ, bước ngắn và checkpoint gần nhau.",
+    "daily_plan": [
+      {
+        "time": "06:30",
+        "title": "Chuẩn bị cặp",
+        "coach": "Level 2: nhắc rõ từng vật dụng quan trọng."
+      },
+      {
+        "time": "16:00",
+        "title": "Bắt đầu ôn bài",
+        "coach": "Chỉ yêu cầu 5 phút đầu để giảm ngại bắt đầu."
+      },
+      {
+        "time": "18:50",
+        "title": "Chuẩn bị làm Toán",
+        "coach": "Nhắc sớm 10 phút và mở sẵn bước đầu tiên."
+      },
+      {
+        "time": "19:00",
+        "title": "Làm bài Toán",
+        "coach": "Checkpoint sau 5–10 phút; hỗ trợ quay lại nếu phân tâm."
+      },
+      {
+        "time": "20:30",
+        "title": "Kiểm tra nhiệm vụ còn lại",
+        "coach": "Nhắc rõ và ưu tiên việc ngắn trước."
+      }
+    ]
+  }
+]

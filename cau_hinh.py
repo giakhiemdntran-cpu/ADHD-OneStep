@@ -19,6 +19,9 @@ REMINDER_CHECK_MS = 2000
 # Database cho người dùng: DEFAULT_USER_ID được khai báo ở đầu file.
 
 
+
+
+
 # Giọng nói / VAD thích nghi
 AUTO_LISTEN = True
 # Sample rate mục tiêu cho STT. Microphone được mở ở native sample rate rồi resample về giá trị này.

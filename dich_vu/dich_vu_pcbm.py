@@ -10,7 +10,6 @@ from cau_hinh import (
     PCBM_RECALL_MODEL,
     PCBM_COMPLETION_MODEL,
     PCBM_SAMPLE_DATA,
-    DEFAULT_USER_ID,
 )
 from dich_vu.co_so_du_lieu import lay_ket_noi_csdl
 from dich_vu.cai_dat_nguoi_dung import tai_cai_dat
@@ -25,25 +24,12 @@ class DichVuPCBM:
         self.ap_dung_muc_nhac = bool(PCBM_APPLY_PROMPT_LEVEL)
         self._mo_hinh_tu_nho = None
         self._mo_hinh_hoan_thanh = None
-
-        # Tương thích cả hai cách gọi:
-        #   DichVuPCBM()
-        #   DichVuPCBM(user_id="user01")
-        saved_user_id = str(
-            tai_cai_dat().get("active_user_id") or DEFAULT_USER_ID
-        ).strip() or DEFAULT_USER_ID
-
-        self.active_user_id = str(
-            user_id or saved_user_id or DEFAULT_USER_ID
-        ).strip() or DEFAULT_USER_ID
-
+        self.active_user_id = str(user_id or tai_cai_dat().get("active_user_id") or "test_U036").strip() or "test_U036"
         self.tai_lai_mo_hinh()
 
 
     def dat_nguoi_dung_hien_tai(self, user_id):
-        user_id = str(
-            user_id or DEFAULT_USER_ID
-        ).strip() or DEFAULT_USER_ID
+        user_id = str(user_id or "test_U036").strip() or "test_U036"
         self.active_user_id = user_id
         return self.active_user_id
 
@@ -51,9 +37,7 @@ class DichVuPCBM:
         return self.active_user_id
 
     def _user(self, user_id=None):
-        return str(
-            user_id or self.active_user_id or DEFAULT_USER_ID
-        ).strip() or DEFAULT_USER_ID
+        return str(user_id or self.active_user_id or "test_U036").strip() or "test_U036"
 
     def tai_lai_mo_hinh(self):
         self._mo_hinh_tu_nho = self._tai_mo_hinh(PCBM_RECALL_MODEL)
@@ -392,6 +376,100 @@ class DichVuPCBM:
             return pd.Timestamp(row["last_time"]).to_pydatetime() + timedelta(minutes=1)
         except Exception:
             return None
+
+    def thu_nghiem_kich_ban_tu_su_kien(self, events, user_id, title, base_prompt_level=1,
+                                        estimated_minutes=30, priority=1, channel="buddy",
+                                        decision_time=None):
+        """Chạy PCBM bằng một lịch sử sự kiện được cung cấp từ bên ngoài.
+
+        Dùng cho Demo Coaching Mode: dữ liệu demo nằm riêng, chạy hoàn toàn trong RAM,
+        không đọc/ghi pcbm_events hoặc pcbm_predictions của người dùng thật.
+        """
+        if not user_id:
+            raise ValueError("Thiếu user_id")
+        title = (title or "Nhiệm vụ thử nghiệm").strip()
+        base_prompt_level = max(0, min(int(base_prompt_level), 2))
+        try:
+            estimated_minutes = int(estimated_minutes or 30)
+        except Exception:
+            estimated_minutes = 30
+        estimated_minutes = max(1, min(estimated_minutes, 480))
+        try:
+            priority = int(priority or 1)
+        except Exception:
+            priority = 1
+        priority = max(1, min(priority, 3))
+        events = list(events or [])
+        if decision_time is None:
+            if events:
+                decision_time = max(e["timestamp"] for e in events) + timedelta(minutes=1)
+            else:
+                decision_time = datetime.now()
+        task_id = f"DEMO::{self._suy_ra_nhiem_vu_loai(title)}"
+        occurrence_id = f"DEMO::{decision_time.strftime('%Y%m%d%H%M%S')}"
+        synthetic_created = {
+            "event_id": "DEMO_TASK_CREATED", "user_id": user_id,
+            "task_id": task_id, "occurrence_id": occurrence_id,
+            "timestamp": decision_time - timedelta(seconds=2),
+            "event_type": "TASK_CREATED",
+            "data": {"title": title, "task_type": self._suy_ra_nhiem_vu_loai(title),
+                     "priority": priority, "estimated_minutes": estimated_minutes},
+        }
+        work_events = events + [synthetic_created]
+        decision = {
+            "event_id": "DEMO_DECISION", "user_id": user_id,
+            "task_id": task_id, "occurrence_id": occurrence_id,
+            "timestamp": decision_time, "event_type": "REMINDER_SENT",
+            "data": {"prompt_level": base_prompt_level,
+                     "reminder_type": "generic" if base_prompt_level <= 1 else "explicit",
+                     "channel": channel or "buddy"},
+        }
+        recall_decision = dict(decision)
+        recall_decision["data"] = dict(decision["data"])
+        recall_decision["data"]["prompt_level"] = 1
+        recall_decision["data"]["reminder_type"] = "generic"
+        recall_features = xay_dung_dac_trung(work_events, recall_decision)
+        completion_features = xay_dung_dac_trung(work_events, decision)
+        recall_p = self._du_doan_xac_suat(self._mo_hinh_tu_nho, recall_features)
+        completion_p = self._du_doan_xac_suat(self._mo_hinh_hoan_thanh, completion_features)
+        recommended = base_prompt_level
+        reason = "KEEP_BASE_LEVEL_ADVISORY_ONLY"
+        if recall_p is not None:
+            if recall_p >= 0.80 and recommended > 0:
+                recommended -= 1
+                reason = "HIGH_RECALL_PROBABILITY_SUGGEST_FADE_ONE_LEVEL"
+            elif recall_p < 0.45 and recommended < 2:
+                recommended += 1
+                reason = "LOW_RECALL_PROBABILITY_SUGGEST_MORE_SUPPORT"
+        profile = {
+            "event_count": recall_features.get("event_count_before"),
+            "history_days": round(float(recall_features.get("history_days") or 0), 1),
+            "cold_start": bool(recall_features.get("is_cold_start")),
+            "recall_rate_7d": self._pct(recall_features.get("recall_rate_7d")),
+            "completion_rate_7d": self._pct(recall_features.get("completion_rate_7d")),
+            "snooze_rate_7d": self._pct(recall_features.get("snooze_rate_7d")),
+            "forget_rate_7d": self._pct(recall_features.get("forget_rate_7d")),
+            "avg_start_delay_7d": None if recall_features.get("avg_start_delay_7d") is None else round(float(recall_features["avg_start_delay_7d"]), 1),
+            "recall_success_streak": recall_features.get("recall_success_streak", 0),
+            "recall_failure_streak": recall_features.get("recall_failure_streak", 0),
+        }
+        return {
+            "user_id": user_id, "profile": profile,
+            "scenario": {"title": title, "base_prompt_level": base_prompt_level,
+                         "decision_time": decision_time.isoformat(timespec="seconds")},
+            "prediction": {
+                "recall_probability": recall_p,
+                "completion_30m_probability": completion_p,
+                "recall_percent": self._pct(recall_p),
+                "completion_30m_percent": self._pct(completion_p),
+                "base_prompt_level": base_prompt_level,
+                "recommended_prompt_level": recommended,
+                "reason_code": reason,
+                "reason_vi": self._ly_do_tieng_viet(reason),
+                "applied": False,
+            },
+            "features": {"recall": recall_features, "completion": completion_features},
+        }
 
     def thu_nghiem_kich_ban(self, user_id, title, base_prompt_level=1,
                             estimated_minutes=30, priority=1, channel="buddy",

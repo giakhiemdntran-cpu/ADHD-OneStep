@@ -2,11 +2,12 @@ import sys
 import threading
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QTimer, Signal, QObject
-from PySide6.QtGui import QPixmap, QPainter, QColor, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QEvent
+from PySide6.QtGui import QPixmap, QPainter, QColor, QKeySequence, QShortcut, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy,
-    QPushButton, QStackedWidget, QLineEdit, QScrollArea, QFrame, QComboBox
+    QPushButton, QStackedWidget, QLineEdit, QScrollArea, QFrame, QComboBox,
+    QTextEdit, QPlainTextEdit
 )
 
 from cau_hinh import (
@@ -26,6 +27,12 @@ from dich_vu.cai_dat_nguoi_dung import tai_cai_dat, luu_cai_dat
 from tro_ly.bo_dinh_tuyen_y_dinh import BoDinhTuyenYDinh
 from tro_ly.cua_so_cai_dat import CuaSoCaiDat
 from tro_ly.cua_so_tro_giup import CuaSoTroGiup
+from tro_ly.cua_so_demo_coaching import CuaSoDemoCoaching
+from dich_vu.demo_coaching import DemoCoachingManager
+from dich_vu.coaching_actions import CoachingActionStore
+from tro_ly.daily_coaching_widget import DailyCoachingWidget
+from pathlib import Path
+from cau_hinh import BASE_DIR
 
 
 class KenhTinHieu(QObject):
@@ -36,6 +43,21 @@ class KenhTinHieu(QObject):
     muc_am_thanh = Signal(float, float)
 
 
+class BoTatBanPhimAo(QObject):
+    """Không cho Qt/Ubuntu tự bật bàn phím ảo khi chạm ô nhập.
+
+    WA_InputMethodEnabled chỉ tắt input method/virtual keyboard; các sự kiện
+    bàn phím vật lý (USB/Bluetooth) vẫn được QLineEdit/QTextEdit nhận bình thường.
+    """
+
+    def eventFilter(self, obj, event):
+        if isinstance(obj, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            if event.type() in (QEvent.FocusIn, QEvent.MouseButtonPress, QEvent.TouchBegin):
+                obj.setAttribute(Qt.WA_InputMethodEnabled, False)
+                im = QApplication.inputMethod()
+                if im is not None and im.isVisible():
+                    im.hide()
+        return super().eventFilter(obj, event)
 
 
 class ThanhMucAmThanh(QWidget):
@@ -106,6 +128,12 @@ class CuaSoTroLy(QWidget):
         self.dich_vu_pcbm = DichVuPCBM()
         self.active_user_id = str(tai_cai_dat().get("active_user_id") or "test_U036").strip() or "test_U036"
         self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(self.active_user_id)
+        self.demo_coaching = DemoCoachingManager(self.dich_vu_pcbm)
+        # Riêng demo: không dùng database nhiệm vụ thật.
+        self.demo_daily_store = CoachingActionStore(Path(BASE_DIR) / "demo_coaching" / "daily_actions.sqlite3")
+        self._demo_reminder_seen = set()
+        self._support_text_full = "Đang tải trạng thái PCBM..."
+        self._daily_text_full = ""
         self.dich_vu_vong_deo.dam_bao_luoc_do()
         self.bo_dinh_tuyen = BoDinhTuyenYDinh(self.dich_vu_nhiem_vu, self.dich_vu_ai, self.dich_vu_huan_luyen, self.dich_vu_thi_giac, self.dich_vu_pcbm)
 
@@ -132,30 +160,30 @@ class CuaSoTroLy(QWidget):
         self._phan_hoi_sau_anh_chup = ""
         self._trang_thai_sau_anh_chup = "idle"
 
-        self.setWindowTitle("OneStep Buddy v10.6 PCBM")
+        self.setWindowTitle("OneStep Buddy v10.9.2 PCBM")
+        # Kiosk: tránh Terminal/desktop che mất nửa dưới màn hình robot.
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         self.setCursor(Qt.BlankCursor)
         self.setStyleSheet("background:#F2F9F7;color:#20303A;")
 
         # Khung chính: nút chuyển giao diện luôn nằm ở góc phải trên.
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 14, 18, 14)
-        root.setSpacing(6)
+        root.setContentsMargins(8, 6, 8, 6)
+        root.setSpacing(3)
 
         top_bar = QHBoxLayout()
         # Chừa khoảng an toàn cho viền màn hình robot:
         # - lùi cụm Người dùng bên trái vào trong
         # - lùi nút Thoát bên phải vào trong
         # - hạ toàn bộ thanh nút xuống một chút để tránh bị cắt mép trên
-        top_bar.setContentsMargins(12, 8, 12, 2)
-        top_bar.setSpacing(6)
+        top_bar.setContentsMargins(4, 2, 4, 1)
+        top_bar.setSpacing(4)
 
         nhan_user = QLabel("👤  Người dùng:")
         nhan_user.setStyleSheet("font:600 14px Arial;color:#365A52;padding-left:2px;")
         top_bar.addWidget(nhan_user)
 
         self.chon_nguoi_dung = QComboBox()
-        self.chon_nguoi_dung.setEditable(False)
-        self.chon_nguoi_dung.setInsertPolicy(QComboBox.NoInsert)
         self.chon_nguoi_dung.setFixedHeight(36)
         self.chon_nguoi_dung.setMinimumWidth(150)
         self.chon_nguoi_dung.setToolTip("Chọn người dùng hiện tại cho Robot Buddy")
@@ -171,25 +199,8 @@ class CuaSoTroLy(QWidget):
                 self.chon_nguoi_dung.addItem(uid)
         idx_user = self.chon_nguoi_dung.findText(self.active_user_id)
         self.chon_nguoi_dung.setCurrentIndex(idx_user if idx_user >= 0 else 0)
+        self.chon_nguoi_dung.currentTextChanged.connect(self.doi_nguoi_dung_hien_tai)
         top_bar.addWidget(self.chon_nguoi_dung)
-
-        # Chỉ áp dụng user khi bấm nút Chọn.
-        # Không thay đổi kích thước / bố cục các nút còn lại của v10.6.
-        self.nut_xac_nhan_user = QPushButton("✓ Chọn")
-        self.nut_xac_nhan_user.setCursor(Qt.PointingHandCursor)
-        self.nut_xac_nhan_user.setFixedHeight(36)
-        self.nut_xac_nhan_user.setFixedWidth(78)
-        self.nut_xac_nhan_user.setToolTip(
-            "Xác nhận đổi sang người dùng đang chọn"
-        )
-        self.nut_xac_nhan_user.setStyleSheet(
-            "QPushButton{background:#2F6F61;border:1px solid #2F6F61;"
-            "border-radius:14px;padding:4px 8px;font:700 14px Arial;color:#FFFFFF;}"
-            "QPushButton:hover{background:#285E53;}"
-            "QPushButton:pressed{background:#214F46;}"
-        )
-        self.nut_xac_nhan_user.clicked.connect(self.xac_nhan_doi_nguoi_dung)
-        top_bar.addWidget(self.nut_xac_nhan_user)
 
         top_bar.addStretch(1)
         self.nut_chuyen_giao_dien = QPushButton("💬  Chat")
@@ -205,6 +216,19 @@ class CuaSoTroLy(QWidget):
         self.nut_chuyen_giao_dien.setToolTip("Chuyển Khuôn mặt / Chat (F1)")
         self.nut_chuyen_giao_dien.clicked.connect(self.chuyen_giao_dien)
         top_bar.addWidget(self.nut_chuyen_giao_dien)
+
+        self.nut_demo_coaching = QPushButton("Demo")
+        self.nut_demo_coaching.setCursor(Qt.PointingHandCursor)
+        self.nut_demo_coaching.setFixedHeight(36)
+        self.nut_demo_coaching.setMinimumWidth(54)
+        self.nut_demo_coaching.setToolTip("Demo Coaching Mode - dữ liệu tách riêng")
+        self.nut_demo_coaching.setStyleSheet(
+            "QPushButton{background:#FFF8E8;border:1px solid #E8C56A;border-radius:20px;"
+            "padding:4px 8px;font:600 12px Arial;color:#70520F;}"
+            "QPushButton:hover{background:#FFF0C7;}"
+        )
+        self.nut_demo_coaching.clicked.connect(self.mo_demo_coaching)
+        top_bar.addWidget(self.nut_demo_coaching)
 
         # Nút Settings: thiết bị audio/camera + buffer VieNeu.
         self.nut_cai_dat = QPushButton("⚙  Cài đặt")
@@ -268,7 +292,21 @@ class CuaSoTroLy(QWidget):
         self.phim_tat_thoat.setContext(Qt.ApplicationShortcut)
         self.phim_tat_thoat.activated.connect(self.thoat_ung_dung)
 
-        root.addLayout(top_bar)
+        # Header có thể cuộn ngang ở màn hình 800px; không cắt nút Thoát/Cài đặt.
+        top_widget = QWidget()
+        top_widget.setLayout(top_bar)
+        top_widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        top_scroll = QScrollArea()
+        top_scroll.setWidget(top_widget)
+        top_scroll.setWidgetResizable(False)
+        top_scroll.setFrameShape(QFrame.NoFrame)
+        top_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        top_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        top_scroll.setFixedHeight(53)
+        top_scroll.setStyleSheet("QScrollArea{background:transparent;border:0;}"
+                                 "QScrollBar:horizontal{height:5px;background:transparent;}"
+                                 "QScrollBar::handle:horizontal{background:#AFCFC7;border-radius:2px;}")
+        root.addWidget(top_scroll)
 
         self.ngan_xep_giao_dien = QStackedWidget()
         root.addWidget(self.ngan_xep_giao_dien, 1)
@@ -283,12 +321,24 @@ class CuaSoTroLy(QWidget):
         # Thanh trạng thái PCBM đặt ở phía trên khuôn mặt để tránh bị che bởi viền dưới màn hình robot.
         self.nhan_muc_ho_tro = QLabel("Đang tải trạng thái PCBM...")
         self.nhan_muc_ho_tro.setAlignment(Qt.AlignCenter)
-        self.nhan_muc_ho_tro.setWordWrap(True)
-        self.nhan_muc_ho_tro.setStyleSheet(
-            "QLabel{background:#FFFFFF;border:1px solid #CFE1DD;border-radius:14px;"
-            "font:600 14px Arial;padding:6px 12px;margin:4px 60px 6px;color:#315C52;}"
-        )
+        self.nhan_muc_ho_tro.setWordWrap(False)
+        self.nhan_muc_ho_tro.setTextFormat(Qt.PlainText)
+        self.nhan_muc_ho_tro.setMinimumHeight(40)
+        self.nhan_muc_ho_tro.setMaximumHeight(40)
+        self.nhan_muc_ho_tro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._set_support_label_style("#FFFFFF", "#CFE1DD", "#315C52")
         lay.addWidget(self.nhan_muc_ho_tro)
+
+        # Chỉ hiện khi Demo Coaching đang chạy: lịch gợi ý trong ngày dựa trên thói quen của hồ sơ demo.
+        self.nhan_goi_y_trong_ngay = QPushButton("🗓 Gợi ý hôm nay • Chạm để xem")
+        self.nhan_goi_y_trong_ngay.setStyleSheet(
+            "QPushButton{background:#FFF9EA;border:1px solid #E8D59A;border-radius:11px;"
+            "font:600 11px Arial;padding:4px 8px;margin:0 54px 4px;color:#6B5520;text-align:left;}"
+        )
+        self.nhan_goi_y_trong_ngay.setFixedHeight(32)
+        self.nhan_goi_y_trong_ngay.clicked.connect(self.mo_daily_coaching_plan)
+        self.nhan_goi_y_trong_ngay.hide()
+        lay.addWidget(self.nhan_goi_y_trong_ngay)
 
         self.nhan_khuon_mat = QLabel()
         self.nhan_khuon_mat.setAlignment(Qt.AlignCenter)
@@ -299,17 +349,20 @@ class CuaSoTroLy(QWidget):
 
         # Meter microphone: thay dòng "Mình đang nghe..." bằng equalizer màu đỏ.
         self.thanh_muc_am_thanh = ThanhMucAmThanh(self.trang_khuon_mat)
+        self.thanh_muc_am_thanh.setFixedHeight(24)
         lay.addWidget(self.thanh_muc_am_thanh)
 
         self.lay_trang_thai_dich_vu = QLabel("Xin chào, mình là OneStep Buddy.")
         self.lay_trang_thai_dich_vu.setAlignment(Qt.AlignCenter)
         self.lay_trang_thai_dich_vu.setWordWrap(True)
-        self.lay_trang_thai_dich_vu.setStyleSheet("font:600 26px Arial;padding:12px 40px;color:#20303A;")
+        self.lay_trang_thai_dich_vu.setStyleSheet("font:600 18px Arial;padding:3px 12px;color:#20303A;")
+        self.lay_trang_thai_dich_vu.setMaximumHeight(54)
         lay.addWidget(self.lay_trang_thai_dich_vu)
         self.nhan_nhiem_vu = QLabel("")
         self.nhan_nhiem_vu.setAlignment(Qt.AlignCenter)
         self.nhan_nhiem_vu.setWordWrap(True)
-        self.nhan_nhiem_vu.setStyleSheet("font:18px Arial;padding:0 40px 8px;color:#567078;")
+        self.nhan_nhiem_vu.setStyleSheet("font:14px Arial;padding:0 12px 3px;color:#567078;")
+        self.nhan_nhiem_vu.setMaximumHeight(40)
         lay.addWidget(self.nhan_nhiem_vu)
 
         self.ngan_xep_giao_dien.addWidget(self.trang_khuon_mat)
@@ -403,6 +456,7 @@ class CuaSoTroLy(QWidget):
         hang_nhap.setSpacing(8)
 
         self.o_nhap_chat = QLineEdit()
+        self.o_nhap_chat.setAttribute(Qt.WA_InputMethodEnabled, False)
         self.o_nhap_chat.setPlaceholderText("Nhắn cho OneStep Buddy...")
         self.o_nhap_chat.setClearButtonEnabled(True)
         self.o_nhap_chat.setMinimumHeight(46)
@@ -443,55 +497,166 @@ class CuaSoTroLy(QWidget):
         self.bo_hen_gio_nhac_nho = QTimer(self)
         self.bo_hen_gio_nhac_nho.timeout.connect(self.kiem_tra_nhac_nho)
         self.bo_hen_gio_nhac_nho.start(REMINDER_CHECK_MS)
+        self.bo_hen_gio_demo_daily = QTimer(self)
+        self.bo_hen_gio_demo_daily.timeout.connect(self.cap_nhat_daily_coaching_plan)
+        self.bo_hen_gio_demo_daily.start(30000)
 
         self.lam_moi_nhiem_vu()
         self.tiep_theo_khung_hinh()
         if AUTO_LISTEN:
             QTimer.singleShot(900, self.lang_nghe)
 
-    def xac_nhan_doi_nguoi_dung(self):
-        """Chỉ đổi active user sau khi bấm nút ✓ Chọn."""
-        if not hasattr(self, "chon_nguoi_dung"):
-            return
+    def _set_support_label_style(self, bg, border, fg):
+        self.nhan_muc_ho_tro.setStyleSheet(
+            f"QLabel{{background:{bg};border:1px solid {border};border-radius:12px;"
+            f"font:600 12px Arial;padding:4px 10px;margin:3px 24px 4px;color:{fg};}}"
+        )
 
-        user_id = str(self.chon_nguoi_dung.currentText() or "").strip()
-        if not user_id:
-            return
+    def _set_support_text(self, text, tooltip=""):
+        self._support_text_full = str(text or "")
+        self.nhan_muc_ho_tro.setToolTip(tooltip or self._support_text_full)
+        self._refresh_support_text()
 
-        self.doi_nguoi_dung_hien_tai(user_id)
+    def _refresh_support_text(self):
+        full = getattr(self, "_support_text_full", "") or ""
+        metrics = QFontMetrics(self.nhan_muc_ho_tro.font())
+        avail = max(120, self.nhan_muc_ho_tro.width() - 24)
+        self.nhan_muc_ho_tro.setText(metrics.elidedText(full, Qt.ElideRight, avail))
+
+    def _set_daily_plan_text(self, text):
+        self._daily_text_full = str(text or "")
+        metrics = QFontMetrics(self.nhan_goi_y_trong_ngay.font())
+        avail = max(120, self.nhan_goi_y_trong_ngay.width() - 28)
+        self.nhan_goi_y_trong_ngay.setText(metrics.elidedText(self._daily_text_full, Qt.ElideRight, avail))
+        self.nhan_goi_y_trong_ngay.setToolTip(self._daily_text_full)
+
+    def _refresh_compact_headers(self):
+        if hasattr(self, "nhan_muc_ho_tro"):
+            self._refresh_support_text()
+        if hasattr(self, "nhan_goi_y_trong_ngay") and self.nhan_goi_y_trong_ngay.isVisible():
+            self._set_daily_plan_text(getattr(self, "_daily_text_full", self.nhan_goi_y_trong_ngay.text()))
+
+    def _refresh_layout_after_mode_change(self):
+        self.bo_nho_dem_khung_hinh.clear()
+        for w in (self.trang_khuon_mat, self.ngan_xep_giao_dien, self):
+            try:
+                if w.layout() is not None:
+                    w.layout().activate()
+                w.updateGeometry()
+                w.update()
+            except Exception:
+                pass
+        QTimer.singleShot(0, self._refresh_compact_headers)
+        QTimer.singleShot(0, self.tiep_theo_khung_hinh)
+        QTimer.singleShot(120, self.tiep_theo_khung_hinh)
+
+    def mo_demo_coaching(self):
+        dlg = CuaSoDemoCoaching(
+            self.demo_coaching.danh_sach_profile(),
+            self.bat_dau_demo_coaching,
+            self.reset_demo_coaching,
+            self,
+        )
+        dlg.exec()
+
+    def _demo_daily_items(self, profile_id):
+        # ID ổn định theo ngày, hồ sơ và vị trí gợi ý. Không lẫn sang task thật.
+        today = datetime.now().date().isoformat()
+        return [
+            {"id": f"{today}:{i}", "time": item.get("time", "--:--"),
+             "title": item.get("title", "Gợi ý"), "detail": item.get("coach", "")}
+            for i, item in enumerate(self.demo_coaching.lich_goi_y_trong_ngay(profile_id))
+        ]
+
+    def cap_nhat_daily_coaching_plan(self):
+        profile_id = self.demo_coaching.profile_id
+        if not profile_id or not self.nhan_goi_y_trong_ngay.isVisible():
+            return
+        lines = []
+        due = []
+        for item in self._demo_daily_items(profile_id):
+            state = self.demo_daily_store.state(profile_id, item["id"])
+            marker = {"pending": "○", "in_progress": "▶", "snoozed": "⏰",
+                      "done": "✓", "skipped": "↷"}.get(state["status"], "○")
+            if state.get("reminder_due"):
+                marker = "🔔"
+                key = (profile_id, item["id"], state.get("updated_at"))
+                if key not in self._demo_reminder_seen:
+                    self._demo_reminder_seen.add(key)
+                    due.append(item["title"])
+            lines.append(f"{marker} {item['time']} {item['title']}")
+        self._set_daily_plan_text("🗓 Gợi ý hôm nay (chạm để thao tác):  " + "   •   ".join(lines))
+        if due:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "⏰ Demo Coaching - Đến giờ nhắc lại",
+                                    "Đã đến giờ xem lại gợi ý:\n" + "\n".join(due))
+
+    def mo_daily_coaching_plan(self):
+        profile_id = self.demo_coaching.profile_id
+        if not profile_id:
+            return
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Daily Coaching Plan • " + profile_id)
+        dialog.resize(650, 510)
+        layout = QVBoxLayout(dialog)
+        widget = DailyCoachingWidget(
+            store=self.demo_daily_store, user_id=profile_id,
+            on_action=lambda result: self.cap_nhat_daily_coaching_plan(), parent=dialog)
+        widget.set_suggestions(self._demo_daily_items(profile_id))
+        layout.addWidget(widget)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(dialog.reject)
+        layout.addWidget(close)
+        dialog.exec()
+        self.cap_nhat_daily_coaching_plan()
+        self._refresh_layout_after_mode_change()
+
+    def reset_demo_coaching(self, profile_id):
+        r = self.demo_coaching.reset(profile_id)
+        self.demo_daily_store.reset_user(profile_id)
+        self._demo_reminder_seen = {k for k in self._demo_reminder_seen if k[0] != profile_id}
+        self._set_support_text(self.demo_coaching.status_text(r))
+        self.nhan_chat_muc_ho_tro.setText(self.demo_coaching.status_text(r))
+        self.nhan_goi_y_trong_ngay.show()
+        self.cap_nhat_daily_coaching_plan()
+        self._refresh_layout_after_mode_change()
+
+    def bat_dau_demo_coaching(self, profile_id):
+        r = self.demo_coaching.start(profile_id)
+        status = r.get("demo_status") or self.demo_coaching.status_text()
+        self._set_support_text(status)
+        self.nhan_chat_muc_ho_tro.setText(status)
+        self.nhan_goi_y_trong_ngay.show()
+        self.cap_nhat_daily_coaching_plan()
+        self.dat_trang_thai("idle", r.get("reply", ""))
+        self._refresh_layout_after_mode_change()
+        self.noi(r.get("reply", ""), "idle")
+
+    def _xu_ly_demo_neu_can(self, text):
+        if not getattr(self, "demo_coaching", None) or not self.demo_coaching.active:
+            return False
+        r = self.demo_coaching.handle(text)
+        if not r:
+            return False
+        if r.get("demo_status"):
+            self._set_support_text(r["demo_status"])
+            self.nhan_chat_muc_ho_tro.setText(r["demo_status"])
+        self.kenh_tin_hieu.ket_qua.emit(r)
+        return True
 
     def doi_nguoi_dung_hien_tai(self, user_id):
         user_id = str(user_id or "").strip()
         if not user_id:
             return
-
         self.active_user_id = user_id
-
-        # Đồng bộ PCBM chính.
-        try:
-            self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(user_id)
-        except Exception:
-            self.dich_vu_pcbm.active_user_id = user_id
-
-        # Đồng bộ service nhiệm vụ nếu bản hiện tại có active_user_id / PCBM riêng.
-        try:
-            self.dich_vu_nhiem_vu.active_user_id = user_id
-            if hasattr(self.dich_vu_nhiem_vu, "pcbm"):
-                try:
-                    self.dich_vu_nhiem_vu.pcbm.dat_nguoi_dung_hien_tai(user_id)
-                except Exception:
-                    self.dich_vu_nhiem_vu.pcbm.active_user_id = user_id
-        except Exception as e:
-            print("[TASK USER SYNC ERROR]", e)
-
+        self.dich_vu_pcbm.dat_nguoi_dung_hien_tai(user_id)
         settings = tai_cai_dat()
         settings["active_user_id"] = user_id
         luu_cai_dat(settings)
-
         print("[ACTIVE USER]", user_id)
-
-        # Giữ nguyên cách refresh trạng thái của bản v10.6.
         self.lam_moi_trang_thai_nguoi_dung()
+        self._refresh_layout_after_mode_change()
 
     @staticmethod
     def _fmt_pct(value):
@@ -552,12 +717,8 @@ class CuaSoTroLy(QWidget):
             text = (f"👤 {uid}   •   Hỗ trợ hiện tại: Level {base_level}   →   "
                     f"PCBM đề xuất: Level {rec} ({huong})   •   "
                     f"Recall {recall}   •   Completion≤30m {completion}{cold}")
-            self.nhan_muc_ho_tro.setText(text)
-            self.nhan_muc_ho_tro.setToolTip(pred.get("reason_vi") or "")
-            self.nhan_muc_ho_tro.setStyleSheet(
-                f"QLabel{{background:{bg};border:1px solid {border};border-radius:14px;"
-                f"font:600 17px Arial;padding:8px 18px;margin:4px 60px 8px;color:{fg};}}"
-            )
+            self._set_support_text(text, pred.get("reason_vi") or "")
+            self._set_support_label_style(bg, border, fg)
             if hasattr(self, "nhan_chat_muc_ho_tro"):
                 self.nhan_chat_muc_ho_tro.setText(
                     f"👤 {uid}  •  L{base_level}→L{rec}  •  Recall {recall}"
@@ -565,7 +726,7 @@ class CuaSoTroLy(QWidget):
                 self.nhan_chat_muc_ho_tro.setToolTip(pred.get("reason_vi") or "")
         except Exception as e:
             print("[PCBM USER STATUS ERROR]", e)
-            self.nhan_muc_ho_tro.setText(f"👤 {uid}  •  Chưa đủ dữ liệu để hiển thị mức hỗ trợ")
+            self._set_support_text(f"👤 {uid}  •  Chưa đủ dữ liệu để hiển thị mức hỗ trợ")
             if hasattr(self, "nhan_chat_muc_ho_tro"):
                 self.nhan_chat_muc_ho_tro.setText(f"👤 {uid}  •  PCBM chưa sẵn sàng")
 
@@ -603,6 +764,7 @@ class CuaSoTroLy(QWidget):
             "bo_hen_gio_hoat_anh",
             "bo_hen_gio_lam_moi",
             "bo_hen_gio_nhac_nho",
+            "bo_hen_gio_demo_daily",
         ):
             bo_hen_gio = getattr(self, ten_bo_hen_gio, None)
             if bo_hen_gio is not None:
@@ -751,6 +913,9 @@ class CuaSoTroLy(QWidget):
         self.dang_xu_ly = True
         self.dat_trang_thai("thinking", f"Bạn: {text}")
 
+        if self._xu_ly_demo_neu_can(text):
+            return
+
         def tien_trinh():
             try:
                 self.kenh_tin_hieu.ket_qua.emit(self.bo_dinh_tuyen.xu_ly(text))
@@ -813,6 +978,7 @@ class CuaSoTroLy(QWidget):
     def thay_doi_kich_thuoc(self, e):
         self.bo_nho_dem_khung_hinh.clear()
         super().resizeEvent(e)
+        self._refresh_compact_headers()
         self.tiep_theo_khung_hinh()
     resizeEvent = thay_doi_kich_thuoc
 
@@ -952,6 +1118,9 @@ class CuaSoTroLy(QWidget):
         self.dang_xu_ly = True
         self.dat_trang_thai("thinking", f"Bạn: {text}")
 
+        if self._xu_ly_demo_neu_can(text):
+            return
+
         def tien_trinh():
             try:
                 self.kenh_tin_hieu.ket_qua.emit(self.bo_dinh_tuyen.xu_ly(text))
@@ -961,7 +1130,7 @@ class CuaSoTroLy(QWidget):
 
     def khi_ket_qua(self, r):
         self.dang_xu_ly = False
-        if r.get("refresh"):
+        if r.get("refresh") and not r.get("demo"):
             self.lam_moi_nhiem_vu()
 
         snapshot_path = r.get("snapshot_path")
@@ -1060,26 +1229,20 @@ class CuaSoTroLy(QWidget):
 
 def chay_tro_ly():
     app = QApplication(sys.argv)
+
+    # Robot dùng màn hình cảm ứng nhưng không cần bàn phím ảo tự bật.
+    # Giữ object này sống suốt vòng đời QApplication.
+    app.bo_tat_ban_phim_ao = BoTatBanPhimAo(app)
+    app.installEventFilter(app.bo_tat_ban_phim_ao)
+
     w = CuaSoTroLy()
 
-    def ep_fullscreen():
-        """Ép cửa sổ Buddy phủ toàn bộ màn hình robot."""
-        screen = app.primaryScreen()
-        if screen is not None:
-            geo = screen.geometry()
-            w.setGeometry(geo)
-
-        # Kiosk-like window: không viền và luôn nằm trên terminal phía sau.
-        w.setWindowFlag(Qt.FramelessWindowHint, True)
-        w.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-
-        w.showFullScreen()
-        w.raise_()
-        w.activateWindow()
-
-    # Gọi ngay và gọi lại sau khi event loop/window manager ổn định.
-    ep_fullscreen()
-    QTimer.singleShot(150, ep_fullscreen)
-    QTimer.singleShot(800, ep_fullscreen)
-
+    # Robot mode: dùng fullscreen thật để window manager không co cửa sổ
+    # và không làm lộ desktop/dock ở các cạnh. Các control phía trên đã
+    # được thu nhỏ và lùi vào trong nên vẫn nằm trong vùng an toàn.
+    w.showFullScreen()
+    w.raise_()
+    w.activateWindow()
+    # Window manager (X11) có thể đổi thứ tự xếp cửa sổ ngay sau showFullScreen.
+    QTimer.singleShot(300, lambda: (w.raise_(), w.activateWindow()))
     sys.exit(app.exec())
