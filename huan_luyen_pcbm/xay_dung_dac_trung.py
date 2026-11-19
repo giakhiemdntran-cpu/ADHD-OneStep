@@ -61,6 +61,60 @@ def _streak_recall(history):
     ), last["timestamp"]
 
 
+# Event feedback được log bởi DieuPhoiPCBM.xu_ly_phan_hoi_muc_ho_tro()
+# Không coi accept/reject như nhãn recall hoặc completion.
+_SUPPORT_ACTIONS = {
+    "SUPPORT_ACCEPTED": "accept", "SUPPORT_REJECTED": "keep",
+    "SUPPORT_DEFERRED": "undecided", "SUPPORT_MORE_REQUESTED": "request_more",
+    "SUPPORT_LESS_REQUESTED": "request_less",
+}
+
+
+def tinh_dac_trung_y_kien(history, decision_time):
+    """Chỉ dùng feedback xảy ra TRƯỚC decision_time, tránh leakage.
+
+    Sự kiện giả lập DEMO không được sử dụng; các sự kiện thật chỉ là đặc trưng
+    lịch sử, không phải nhãn thành công hay sự cho phép tự động thay đổi Level.
+    """
+    recent=[]
+    for e in history:
+        timestamp=e.get("timestamp")
+        if timestamp is None or not decision_time-timedelta(days=30) <= timestamp < decision_time:
+            continue
+        if str(e.get("user_id", "")).upper().startswith("DEMO"):
+            continue
+        event_type=str(e.get("event_type", "")).upper()
+        if event_type not in _SUPPORT_ACTIONS:
+            continue
+        data=e.get("data") or {}
+        if data.get("is_demo") or data.get("simulation"):
+            continue
+        action=str(data.get("user_preference") or _SUPPORT_ACTIONS[event_type])
+        if action not in {"accept", "keep", "undecided", "request_more", "request_less"}:
+            continue
+        recent.append((timestamp, action, data))
+    recent.sort(key=lambda v:v[0])
+    counts={a:sum(x[1]==a for x in recent) for a in
+            ("accept", "keep", "undecided", "request_more", "request_less")}
+    last=recent[-1] if recent else None
+    level=None
+    if last:
+        try:
+            level=max(0,min(2,int(last[2].get("final_level"))))
+        except (TypeError,ValueError):
+            level=None
+    return {
+        "user_feedback_count_30d": len(recent),
+        "user_feedback_accept_rate_30d": (counts["accept"]/len(recent)) if recent else None,
+        "user_feedback_keep_count_30d": counts["keep"],
+        "user_feedback_more_count_30d": counts["request_more"],
+        "user_feedback_less_count_30d": counts["request_less"],
+        "user_feedback_last_action": last[1] if last else "none",
+        "user_feedback_last_final_level": level,
+        "user_feedback_age_days": (decision_time-last[0]).total_seconds()/86400 if last else None,
+    }
+
+
 def xay_dung_dac_trung(events, decision):
     """Xây đặc trưng PCBM v4 với ranh giới thời gian nghiêm ngặt.
 
@@ -119,10 +173,13 @@ def xay_dung_dac_trung(events, decision):
     if last_recall_time is not None:
         minutes_since_last_recall = max(0.0, (t - last_recall_time).total_seconds() / 60.0)
 
+    feedback_features=tinh_dac_trung_y_kien(history, t)
+
     hour = t.hour
     weekday = t.weekday()
 
     return {
+        **feedback_features,
         "user_id": user_id,
         "task_id": task_id,
         "occurrence_id": occ,

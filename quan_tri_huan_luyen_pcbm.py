@@ -314,6 +314,61 @@ def _show_leaderboard(title, bundle):
     st.dataframe(board_df, use_container_width=True, hide_index=True)
 
 
+def _show_confusion_matrix(title, bundle):
+    """Matrix từ walk-forward OOF của model được chọn, KHÔNG phải phép xác thực lâm sàng."""
+    if not bundle:
+        return
+    ev=bundle.get("evaluation") or {}
+    cm=ev.get("confusion_matrix")
+    if not ev.get("available") or not isinstance(cm,list) or len(cm)!=2 or any(len(r)!=2 for r in cm):
+        st.info(f"{title}: Chưa có confusion matrix hợp lệ. Cần huấn luyện với đủ fold có nhãn.")
+        return
+    tn,fp=cm[0]
+    fn,tp=cm[1]
+    st.markdown(f"##### Confusion matrix — {title}")
+    st.caption("Tổng hợp các dự đoán ngoài tập train của từng fold walk-forward theo thời gian; "
+               "không phải bộ test độc lập và không đánh giá trực tiếp quyết định Level 0/1/2.")
+    table=pd.DataFrame([[int(tn),int(fp)],[int(fn),int(tp)]],
+                       index=["Thực tế: 0", "Thực tế: 1"],
+                       columns=["Dự đoán: 0", "Dự đoán: 1"])
+    st.dataframe(table, use_container_width=False)
+    st.caption(f"TN={int(tn)} (đúng âm) · FP={int(fp)} (báo dương sai) · "
+               f"FN={int(fn)} (bỏ sót dương) · TP={int(tp)} (đúng dương). "
+               f"Recall={_metric_value(ev.get('recall'))}, "
+               f"Precision={_metric_value(ev.get('precision'))}, "
+               f"Balanced Accuracy={_metric_value(ev.get('balanced_accuracy'))}.")
+    st.info("Nhãn 1 Recall = phản hồi nhớ đúng sau generic cue (≤2 phút). "
+            "Nhãn 1 Completion = hoàn thành trong ≤30 phút sau reminder. "
+            "Mức hỗ trợ được bộ điều phối đề xuất theo quy tắc và có sự đồng thuận người dùng; "
+            "confusion matrix không phải công thức suy ra Level.")
+
+
+def _show_feedback_training_info():
+    st.markdown("##### Ý kiến người dùng trong pipeline")
+    st.caption("Feedback được lưu qua SUPPORT_ACCEPTED / REJECTED / DEFERRED / "
+               "MORE_REQUESTED / LESS_REQUESTED. Chỉ phản hồi có timestamp trước quyết định mới "
+               "được biến thành đặc trưng; không đổi nhãn Recall/Completion.")
+    try:
+        rows=_rows("SELECT event_type, COUNT(*) AS n FROM pcbm_events "
+                   "WHERE event_type IN ('SUPPORT_ACCEPTED','SUPPORT_REJECTED',"
+                   "'SUPPORT_DEFERRED','SUPPORT_MORE_REQUESTED','SUPPORT_LESS_REQUESTED') "
+                   "AND user_id NOT LIKE 'DEMO%' GROUP BY event_type ORDER BY event_type")
+        count=sum(int(r['n']) for r in rows)
+        st.metric("Phản hồi đã ghi nhận trong SQLite (không tính DEMO)", count)
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        df=_training_df()
+        if not df.empty and 'user_feedback_count_30d' in df:
+            with_feedback=int((df['user_feedback_count_30d'].fillna(0)>0).sum())
+            st.caption(f"Training records có lịch sử phản hồi trước thời điểm dự đoán: {with_feedback}/{len(df)}. "
+                       "Cần nhấn Train PCBM từ SQLite để huấn luyện lại mô hình và kiểm chứng kết quả.")
+        st.warning("Phản hồi là yếu tố đầu vào, KHÔNG phải trọng số tùy ý hay nhãn đúng/sai. "
+                   "Nếu số lượng phản hồi ít hoặc tập trung vào vài người dùng, chưa thể kết luận "
+                   "chúng làm mô hình tốt hơn; cần so sánh ablation (có/không feedback) "
+                   "và test độc lập theo người/thời gian.")
+    except Exception as e:
+        st.warning(f"Chưa đọc được thống kê phản hồi: {e}")
+
+
 def _batch_test(bundle, df, target):
     work = df[df[target].notna()].copy()
     if work.empty:
@@ -574,6 +629,18 @@ def hien_thi_quan_tri_huan_luyen_pcbm():
         _show_leaderboard("So sánh 4 mô hình Recall", recall_bundle)
         _show_model_summary("Mô hình Completion 30m hiện tại", completion_bundle)
         _show_leaderboard("So sánh 4 mô hình Completion 30m", completion_bundle)
+        _show_confusion_matrix("Recall", recall_bundle)
+        _show_confusion_matrix("Completion 30m", completion_bundle)
+        _show_feedback_training_info()
+        st.markdown("##### Từ dự đoán đến quyết định mức hỗ trợ")
+        st.caption("Theo quy tắc hiện tại trong dich_vu_pcbm.py: Recall >= 0.80 -> "
+                   "đề xuất giảm 1 Level; Recall < 0.45 -> đề xuất tăng 1 Level; "
+                   "còn lại -> giữ nguyên. Xác suất Completion là chỉ số bổ sung, "
+                   "không trực tiếp quyết định Level trong quy tắc này.")
+        st.warning("Các ngưỡng 0.80/0.45 là quy tắc vận hành đang thử nghiệm, "
+                   "không được suy ra từ confusion matrix. Dù AI đề xuất giảm, "
+                   "Human-in-the-loop vẫn chặn tự giảm khi thiếu kiểm chứng độc lập; "
+                   "người dùng có thể từ chối và giữ nguyên mức hỗ trợ.")
 
         if st.session_state.pop("pcbm_train_success", None):
             st.success("Huấn luyện PCBM thành công. Hai model đang triển khai và leaderboard đã được cập nhật.")
