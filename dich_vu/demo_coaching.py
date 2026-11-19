@@ -33,6 +33,10 @@ class DemoCoachingManager:
                 d = json.loads(line)
                 d["timestamp"] = pd.Timestamp(d["timestamp"]).to_pydatetime()
                 out.setdefault(d["user_id"], []).append(d)
+        # Extra HITL demo profile reuses A's *demo* seed, never real user events.
+        if "DEMO_STABLE" in out:
+            out["DEMO_HITL_REVIEW"] = [dict(e, user_id="DEMO_HITL_REVIEW", data=dict(e.get("data") or {}))
+                                         for e in out["DEMO_STABLE"]]
         for uid in out:
             out[uid].sort(key=lambda e: e["timestamp"])
         return out

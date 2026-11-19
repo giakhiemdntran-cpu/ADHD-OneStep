@@ -7,7 +7,7 @@ from PySide6.QtGui import QPixmap, QPainter, QColor, QKeySequence, QShortcut, QF
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy,
     QPushButton, QStackedWidget, QLineEdit, QScrollArea, QFrame, QComboBox,
-    QTextEdit, QPlainTextEdit
+    QTextEdit, QPlainTextEdit, QDialog, QDialogButtonBox
 )
 
 from cau_hinh import (
@@ -30,6 +30,8 @@ from tro_ly.cua_so_tro_giup import CuaSoTroGiup
 from tro_ly.cua_so_demo_coaching import CuaSoDemoCoaching
 from dich_vu.demo_coaching import DemoCoachingManager
 from dich_vu.coaching_actions import CoachingActionStore
+from dich_vu.pcbm_review_store import ReviewStore
+from dich_vu.pcbm_human_loop import decide_support
 from tro_ly.daily_coaching_widget import DailyCoachingWidget
 from pathlib import Path
 from cau_hinh import BASE_DIR
@@ -132,6 +134,11 @@ class CuaSoTroLy(QWidget):
         # Riêng demo: không dùng database nhiệm vụ thật.
         self.demo_daily_store = CoachingActionStore(Path(BASE_DIR) / "demo_coaching" / "daily_actions.sqlite3")
         self._demo_reminder_seen = set()
+        self.pcbm_review_store = ReviewStore(Path(BASE_DIR) / "storage" / "pcbm_support_reviews.sqlite3")
+        self._review_active_dialog = False
+        self._hitl_demo_scenario = "decrease"
+        self._review_observed_today = None
+        self._pending_review_offer = None
         self._support_text_full = "Đang tải trạng thái PCBM..."
         self._daily_text_full = ""
         self.dich_vu_vong_deo.dam_bao_luoc_do()
@@ -230,6 +237,19 @@ class CuaSoTroLy(QWidget):
         self.nut_demo_coaching.clicked.connect(self.mo_demo_coaching)
         top_bar.addWidget(self.nut_demo_coaching)
 
+        # Explicit, always-visible entry point: not hidden in the PCBM status line.
+        self.nut_muc_ho_tro = QPushButton("☷ Mức hỗ trợ")
+        self.nut_muc_ho_tro.setCursor(Qt.PointingHandCursor)
+        self.nut_muc_ho_tro.setFixedHeight(36)
+        self.nut_muc_ho_tro.setMinimumWidth(104)
+        self.nut_muc_ho_tro.setToolTip("Xem đề xuất PCBM; đồng ý, giữ nguyên hoặc yêu cầu thay đổi")
+        self.nut_muc_ho_tro.setStyleSheet(
+            "QPushButton{background:#E6F4ED;border:1px solid #90C9AF;border-radius:16px;"
+            "padding:4px 7px;font:600 12px Arial;color:#176647;}"
+            "QPushButton:hover{background:#D5F0E2;}")
+        self.nut_muc_ho_tro.clicked.connect(self.mo_phan_hoi_pcbm)
+        top_bar.addWidget(self.nut_muc_ho_tro)
+
         # Nút Settings: thiết bị audio/camera + buffer VieNeu.
         self.nut_cai_dat = QPushButton("⚙  Cài đặt")
         self.nut_cai_dat.setCursor(Qt.PointingHandCursor)
@@ -326,6 +346,9 @@ class CuaSoTroLy(QWidget):
         self.nhan_muc_ho_tro.setMinimumHeight(40)
         self.nhan_muc_ho_tro.setMaximumHeight(40)
         self.nhan_muc_ho_tro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.nhan_muc_ho_tro.setToolTip("Chạm vào đây để xem dự đoán và phản hồi mức hỗ trợ")
+        self.nhan_muc_ho_tro.setCursor(Qt.PointingHandCursor)
+        self.nhan_muc_ho_tro.mousePressEvent = lambda event: self.mo_phan_hoi_pcbm()
         self._set_support_label_style("#FFFFFF", "#CFE1DD", "#315C52")
         lay.addWidget(self.nhan_muc_ho_tro)
 
@@ -550,6 +573,212 @@ class CuaSoTroLy(QWidget):
         QTimer.singleShot(0, self.tiep_theo_khung_hinh)
         QTimer.singleShot(120, self.tiep_theo_khung_hinh)
 
+    def _thong_tin_demo_hitl(self, scenario):
+        """Two transparent, illustrative cases; no fabricated real-world evidence."""
+        if scenario == "increase":
+            return {
+                "current": 1, "proposed": 2,
+                "heading": "Buddy đề xuất HỖ TRỢ THÊM",
+                "message": (
+                    "Mình nhận thấy trong tình huống mô phỏng gần đây, bạn thường "
+                    "quên việc hoặc chậm bắt đầu. Bạn có muốn mình hỗ trợ chi tiết hơn không?"
+                ),
+                "evidence": (
+                    "VÍ DỤ GIẢ LẬP: Trong 5 lần làm nhiệm vụ, người dùng quên 2 lần "
+                    "và trì hoãn 3 lần. Đây không phải số liệu đo trên người dùng thật."
+                ),
+                "caution": "Đây là lời mời tăng hỗ trợ, không phải kết luận về ADHD.",
+            }
+        return {
+            "current": 1, "proposed": 0,
+            "heading": "Buddy đề xuất GIẢM NHẮC NHỞ",
+            "message": (
+                "Mình nhận thấy trong tình huống mô phỏng gần đây, bạn đã chủ động "
+                "bắt đầu công việc thường xuyên hơn. Bạn có muốn thử nhận ít lời nhắc hơn không?"
+            ),
+            "evidence": (
+                "VÍ DỤ GIẢ LẬP: Trong 5 lần thực hiện nhiệm vụ, người dùng tự bắt đầu "
+                "4 lần. Đây chỉ là minh họa quan sát nhiều phiên, không phải bằng chứng "
+                "mô hình đã được kiểm định độc lập."
+            ),
+            "caution": (
+                "Để bảo đảm an toàn, bản thử nghiệm chỉ ghi nhận mong muốn giảm; "
+                "chưa tự động giảm Level khi chưa đủ bằng chứng kiểm định."
+            ),
+        }
+
+    def mo_phan_hoi_pcbm(self, auto=False):
+        """Visible on-demand review. Qualified proposals also invite review, never force a change."""
+        if self._review_active_dialog:
+            return
+        demo = bool(getattr(self.demo_coaching, "active", False)
+                    and self.demo_coaching.profile_id == "DEMO_HITL_REVIEW")
+        assessment = None
+        if demo:
+            uid = self.demo_coaching.profile_id
+            self._hitl_demo_scenario = getattr(self, "_hitl_demo_scenario", "decrease")
+            # A stable demo starting level on every scenario; no real level change.
+            current = self.pcbm_review_store.get_demo_choice(uid, 1)
+            scenario = self._thong_tin_demo_hitl(self._hitl_demo_scenario)
+            proposed = scenario["proposed"]
+        else:
+            uid = self.active_user_id
+            try:
+                dp = self.bo_dinh_tuyen.dieu_phoi_pcbm
+                assessment = dp.danh_gia()
+                pred = assessment.get("prediction") or {}
+                current = dp.lay_muc_ho_tro(uid)
+                proposed = dp._clamp_level(pred.get("recommended_prompt_level", current))
+                detail = pred.get("reason_vi") or "Chưa có giải thích chi tiết từ mô hình."
+            except Exception as exc:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "PCBM", f"Chưa thể đánh giá: {exc}")
+                return
+        self._review_active_dialog = True
+        try:
+            from PySide6.QtWidgets import QGridLayout
+            dlg = QDialog(self)
+            dlg.setWindowTitle("PCBM – Gợi ý hỗ trợ và ý kiến của bạn")
+            dlg.setModal(True)
+            screen = self.screen().availableGeometry() if self.screen() else None
+            w = min(690, max(340, (screen.width() if screen else self.width())-28))
+            h = min(450, max(310, (screen.height() if screen else self.height())-34))
+            dlg.resize(w, h)
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(12, 8, 12, 8)
+            lay.setSpacing(5)
+
+            if demo:
+                from PySide6.QtWidgets import QComboBox
+                switch = QComboBox()
+                switch.addItem("Tình huống 1: Buddy đề xuất giảm hỗ trợ", "decrease")
+                switch.addItem("Tình huống 2: Buddy đề xuất tăng hỗ trợ", "increase")
+                switch.setCurrentIndex(0 if self._hitl_demo_scenario == "decrease" else 1)
+                switch.setToolTip("Hai tình huống giả lập dùng để kiểm thử giao diện")
+                lay.addWidget(switch)
+            else:
+                switch = None
+
+            heading = QLabel()
+            heading.setWordWrap(True)
+            heading.setStyleSheet("font:700 16px Arial;color:#1E6155;padding:3px;")
+            lay.addWidget(heading)
+            message = QLabel()
+            message.setWordWrap(True)
+            message.setStyleSheet("font:600 13px Arial;color:#233A35;padding:3px;")
+            lay.addWidget(message)
+            evidence = QLabel()
+            evidence.setWordWrap(True)
+            evidence.setStyleSheet("background:#EBF6F2;border-radius:8px;padding:8px;font:12px Arial;color:#294E45;")
+            lay.addWidget(evidence)
+            caution = QLabel()
+            caution.setWordWrap(True)
+            caution.setStyleSheet("font:11px Arial;color:#715C34;padding:3px;")
+            lay.addWidget(caution)
+            levels = QLabel()
+            levels.setWordWrap(True)
+            levels.setStyleSheet("font:700 12px Arial;color:#173E56;padding:3px;")
+            lay.addWidget(levels)
+            grid = QGridLayout()
+            actions = [
+                ("✓ Đồng ý với đề xuất", "accept"),
+                ("= Chưa muốn thay đổi", "keep"),
+                ("+ Muốn hỗ trợ thêm", "request_more"),
+                ("− Muốn giảm lời nhắc", "request_less"),
+                ("? Để quyết định sau", "undecided"),
+            ]
+            # Read active scenario at click time so switching scenario works.
+            for i, (label, action) in enumerate(actions):
+                btn = QPushButton(label)
+                btn.setMinimumHeight(34)
+                btn.clicked.connect(lambda checked=False, a=action: self._chon_phan_hoi_pcbm(
+                    dlg, a, assessment, demo=demo,
+                    current=(1 if demo else current),
+                    proposed=(self._thong_tin_demo_hitl(self._hitl_demo_scenario)["proposed"]
+                              if demo else proposed)))
+                grid.addWidget(btn, i // 2, i % 2)
+            lay.addLayout(grid)
+            lay.addStretch(1)
+            close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            close.rejected.connect(dlg.reject)
+            lay.addWidget(close)
+
+            def refresh_scenario(*_):
+                if demo:
+                    self._hitl_demo_scenario = switch.currentData()
+                    d = self._thong_tin_demo_hitl(self._hitl_demo_scenario)
+                    heading.setText("🎬 DEMO • " + d["heading"])
+                    message.setText(d["message"])
+                    evidence.setText(d["evidence"])
+                    caution.setText(d["caution"])
+                    levels.setText(f"Mức hiện tại: Level 1 → PCBM đề xuất: Level {d['proposed']}")
+                else:
+                    direction = ("TĂNG HỖ TRỢ" if proposed > current else
+                                 "GIẢM NHẮC NHỞ" if proposed < current else "GIỮ MỨC HIỆN TẠI")
+                    heading.setText("PCBM đề xuất: " + direction)
+                    message.setText(
+                        f"Mình nhận thấy lịch sử hành vi cho thấy có thể cần xem lại mức hỗ trợ. "
+                        f"Bạn có muốn thay đổi từ Level {current} sang Level {proposed} không?"
+                    )
+                    evidence.setText("Giải thích từ PCBM: " + detail)
+                    caution.setText(
+                        "Kết quả dự đoán chưa thay thế kiểm định độc lập. "
+                        "Đề xuất không tự động giảm nhắc; bạn có thể giữ nguyên."
+                    )
+                    levels.setText(f"Mức hiện tại: Level {current} → PCBM đề xuất: Level {proposed}")
+            if switch is not None:
+                switch.currentIndexChanged.connect(refresh_scenario)
+            refresh_scenario()
+            dlg.exec()
+        finally:
+            self._review_active_dialog = False
+            self.lam_moi_trang_thai_nguoi_dung()
+            self._refresh_layout_after_mode_change()
+
+    def _chon_phan_hoi_pcbm(self, dialog, action, assessment, *, demo=False, current=1, proposed=1):
+        from PySide6.QtWidgets import QMessageBox
+        try:
+            if demo:
+                decision = decide_support(current,proposed,action,
+                                          independently_validated=False,
+                                          evidence_of_independence=False)
+                uid = self.demo_coaching.profile_id
+                self.pcbm_review_store.save_demo_choice(uid,decision.final_level,action)
+                reply = (f"[DEMO] Level {current} → Level {decision.final_level}. " + decision.reason
+                         + "\nThao tác thử nghiệm không ghi vào dữ liệu người dùng thật.")
+            else:
+                result=self.bo_dinh_tuyen.dieu_phoi_pcbm.xu_ly_phan_hoi_muc_ho_tro(action,assessment)
+                reply=result["reply"]
+        except Exception as exc:
+            QMessageBox.warning(dialog,"Lỗi ghi nhận phản hồi",str(exc))
+            return
+        QMessageBox.information(dialog,"PCBM – Phản hồi đã ghi nhận",reply)
+        dialog.accept()
+
+    def _ghi_nhan_xem_xet_pcbm(self, assessment, current, proposed):
+        """Only prompt after 3 consecutive *calendar days* with same direction.
+        This does NOT claim that a model is statistically validated.
+        """
+        if self.demo_coaching.active or current == proposed or self._review_active_dialog:
+            return
+        uid = self.active_user_id
+        today = datetime.now().date()
+        key = (uid,today.isoformat(),current,proposed)
+        if self._review_observed_today != key:
+            self.pcbm_review_store.observe(uid,current,proposed,today.isoformat())
+            self._review_observed_today = key
+        if not self.pcbm_review_store.should_offer(uid,current,proposed,today,minimum=3):
+            return
+        if self._pending_review_offer == (uid,proposed):
+            return
+        self._pending_review_offer = (uid,proposed)
+        self.pcbm_review_store.mark_offered(uid,proposed)
+        def offer():
+            self._pending_review_offer = None
+            if not self.demo_coaching.active and self.active_user_id == uid:
+                self.mo_phan_hoi_pcbm(auto=True)
+        QTimer.singleShot(400,offer)
+
     def mo_demo_coaching(self):
         dlg = CuaSoDemoCoaching(
             self.demo_coaching.danh_sach_profile(),
@@ -620,6 +849,8 @@ class CuaSoTroLy(QWidget):
         self.nhan_chat_muc_ho_tro.setText(self.demo_coaching.status_text(r))
         self.nhan_goi_y_trong_ngay.show()
         self.cap_nhat_daily_coaching_plan()
+        if profile_id == "DEMO_HITL_REVIEW":
+            self.pcbm_review_store.reset_demo(profile_id)
         self._refresh_layout_after_mode_change()
 
     def bat_dau_demo_coaching(self, profile_id):
@@ -631,6 +862,9 @@ class CuaSoTroLy(QWidget):
         self.cap_nhat_daily_coaching_plan()
         self.dat_trang_thai("idle", r.get("reply", ""))
         self._refresh_layout_after_mode_change()
+        if profile_id == "DEMO_HITL_REVIEW":
+            self._hitl_demo_scenario = "decrease"
+            QTimer.singleShot(350, self.mo_phan_hoi_pcbm)
         self.noi(r.get("reply", ""), "idle")
 
     def _xu_ly_demo_neu_can(self, text):
@@ -670,6 +904,18 @@ class CuaSoTroLy(QWidget):
     def lam_moi_trang_thai_nguoi_dung(self):
         """Hiển thị user hiện tại + mức hỗ trợ PCBM mà không ghi dữ liệu test vào DB."""
         if not hasattr(self, "nhan_muc_ho_tro"):
+            return
+        # Do not overwrite DEMO status with the real user's PCBM every 2 seconds.
+        if getattr(self, "demo_coaching", None) and self.demo_coaching.active:
+            demo_text = self.demo_coaching.status_text()
+            if self.demo_coaching.profile_id == "DEMO_HITL_REVIEW":
+                lvl = self.pcbm_review_store.get_demo_choice("DEMO_HITL_REVIEW", 1)
+                d = self._thong_tin_demo_hitl(getattr(self, "_hitl_demo_scenario", "decrease"))
+                demo_text = (f"🎬 DEMO • {d['heading']} • Level mô phỏng: {lvl} "
+                             f"→ Đề xuất Level {d['proposed']} • Chạm Mức hỗ trợ để trả lời")
+            self._set_support_text(demo_text)
+            if hasattr(self, "nhan_chat_muc_ho_tro"):
+                self.nhan_chat_muc_ho_tro.setText(demo_text)
             return
         uid = getattr(self, "active_user_id", "test_U036")
         try:
@@ -719,6 +965,10 @@ class CuaSoTroLy(QWidget):
                     f"Recall {recall}   •   Completion≤30m {completion}{cold}")
             self._set_support_text(text, pred.get("reason_vi") or "")
             self._set_support_label_style(bg, border, fg)
+            try:
+                self._ghi_nhan_xem_xet_pcbm(result, base_level, rec)
+            except Exception as e:
+                print("[PCBM REVIEW OBSERVATION ERROR]", e)
             if hasattr(self, "nhan_chat_muc_ho_tro"):
                 self.nhan_chat_muc_ho_tro.setText(
                     f"👤 {uid}  •  L{base_level}→L{rec}  •  Recall {recall}"

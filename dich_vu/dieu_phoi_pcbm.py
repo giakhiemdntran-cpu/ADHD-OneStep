@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from dich_vu.cai_dat_nguoi_dung import tai_cai_dat, luu_cai_dat
+from dich_vu.pcbm_human_loop import decide_support
 
 
 class DieuPhoiPCBM:
@@ -139,32 +140,49 @@ class DieuPhoiPCBM:
             "refresh": True,
         }
 
-    def chap_nhan_de_xuat(self):
+    def xu_ly_phan_hoi_muc_ho_tro(self, action, assessment=None):
+        """User consent is mandatory; do not use model score as its own reliability proof."""
         uid = self._user()
-        result = self.danh_gia()
+        result = assessment if assessment is not None else self.danh_gia()
         p = result.get("prediction") or {}
         old = self.lay_muc_ho_tro(uid)
-        new = self._clamp_level(p.get("recommended_prompt_level", old))
-        if new == old:
-            return {"reply": f"PCBM đang đề xuất giữ Level {old}, nên Buddy sẽ tiếp tục mức hỗ trợ hiện tại.", "state": "idle", "refresh": True}
-        self.dat_muc_ho_tro(new, uid)
-        cur_task = self.nhiem_vu.lay_nhiem_vu_hien_tai()
-        self.pcbm.ghi_su_kien(
-            "SUPPORT_ACCEPTED",
-            None if cur_task.get("done") else cur_task.get("task_id"),
-            None if cur_task.get("done") else cur_task.get("occurrence_id"),
-            {"from_level": old, "to_level": new, "reason_code": p.get("reason_code")},
-            user_id=uid,
-        )
+        rec = self._clamp_level(p.get("recommended_prompt_level", old))
+        # Experimental default: independent external test and longitudinal behavioral
+        # evidence have not been reviewed/approved, so we do not reduce support.
+        d = decide_support(old, rec, action,
+                           independently_validated=False,
+                           evidence_of_independence=False)
+        if d.final_level != old:
+            self.dat_muc_ho_tro(d.final_level, uid)
+        task = self.nhiem_vu.lay_nhiem_vu_hien_tai()
+        event = {
+            "accept": "SUPPORT_ACCEPTED", "keep": "SUPPORT_REJECTED",
+            "undecided": "SUPPORT_DEFERRED", "request_more": "SUPPORT_MORE_REQUESTED",
+            "request_less": "SUPPORT_LESS_REQUESTED",
+        }[action]
+        self.pcbm.ghi_su_kien(event,
+            None if task.get("done") else task.get("task_id"),
+            None if task.get("done") else task.get("occurrence_id"),
+            {"current_level": old, "ai_recommended_level": rec,
+             "user_preference": action, "final_level": d.final_level,
+             "change_applied": d.final_level != old,
+             "reason": d.reason, "model_reason_code": p.get("reason_code"),
+             "policy_version": "human_loop_v11_trial_1", "evaluation": "trial_only"},
+            user_id=uid)
         s = self._session.setdefault(uid, {})
-        s["support_before"] = old
-        s["support_after"] = new
-        s["support_accepted_at"] = datetime.now().isoformat(timespec="seconds")
-        if new < old:
-            action = "Buddy sẽ nhắc ít hơn và ưu tiên quan sát trước khi hỗ trợ thêm."
+        s.update({"support_before": old, "support_after": d.final_level,
+                  "support_preference": action,
+                  "support_feedback_at": datetime.now().isoformat(timespec="seconds")})
+        if d.final_level != old:
+            reply = f"Buddy đã đổi Level {old} thành Level {d.final_level} theo ý kiến của em. {d.reason}"
         else:
-            action = "Buddy sẽ nhắc rõ hơn để em dễ bắt đầu nhiệm vụ."
-        return {"reply": f"Được. Buddy đã chuyển mức hỗ trợ từ Level {old} sang Level {new}. {action}", "state": "success", "refresh": True}
+            reply = f"Buddy giữ Level {old}. {d.reason}"
+        return {"reply": reply, "state": "success", "refresh": True,
+                "current_level": old, "recommended_level": rec,
+                "final_level": d.final_level, "user_preference": action}
+
+    def chap_nhan_de_xuat(self):
+        return self.xu_ly_phan_hoi_muc_ho_tro("accept")
 
     def ghi_feedback(self, kind):
         uid = self._user()
@@ -261,7 +279,15 @@ class DieuPhoiPCBM:
             return self.thong_tin_muc_ho_tro()
         if any(x in low for x in ["tại sao buddy", "vì sao buddy", "tại sao lại đề xuất", "vì sao lại đề xuất", "tại sao chọn mức", "giải thích mức hỗ trợ"]):
             return self.giai_thich()
-        if any(x in low for x in ["nhắc ít hơn", "giảm mức hỗ trợ", "đồng ý giảm", "chấp nhận đề xuất", "đồng ý với đề xuất"]):
+        if any(x in low for x in ["chưa muốn tăng", "không đồng ý", "không muốn đổi", "giữ nguyên mức", "để mức cũ", "chưa muốn giảm"]):
+            return self.xu_ly_phan_hoi_muc_ho_tro("keep")
+        if any(x in low for x in ["chưa chắc", "để tôi suy nghĩ", "để em suy nghĩ"]):
+            return self.xu_ly_phan_hoi_muc_ho_tro("undecided")
+        if any(x in low for x in ["muốn nhắc nhiều hơn", "tăng hỗ trợ cho em", "cần hỗ trợ thêm"]):
+            return self.xu_ly_phan_hoi_muc_ho_tro("request_more")
+        if any(x in low for x in ["nhắc ít hơn", "giảm mức hỗ trợ"]):
+            return self.xu_ly_phan_hoi_muc_ho_tro("request_less")
+        if any(x in low for x in ["đồng ý giảm", "chấp nhận đề xuất", "đồng ý với đề xuất"]):
             return self.chap_nhan_de_xuat()
         if any(x in low for x in ["mức nhắc này vừa đủ", "mức hỗ trợ này vừa đủ", "vừa đủ"]):
             return self.ghi_feedback("just_right")

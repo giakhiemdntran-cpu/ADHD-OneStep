@@ -93,5 +93,20 @@
         "coach": "Nhắc rõ và ưu tiên việc ngắn trước."
       }
     ]
+  },
+  {
+    "user_id": "DEMO_HITL_REVIEW",
+    "label": "Hồ sơ D – PCBM + Ý kiến người dùng (DEMO)",
+    "description": "Mô phỏng AI đề xuất giảm Level 1 → 0 nhưng người dùng muốn giữ Level 1. Thử nút Mức hỗ trợ. Không sửa dữ liệu thật.",
+    "source_profile": "U036",
+    "base_prompt_level": 1,
+    "habit_summary": "Tình huống GIẢ LẬP để thử sự đồng thuận; không phải bằng chứng huấn luyện hay kiểm định mô hình.",
+    "daily_plan": [
+      {
+        "time": "19:00",
+        "title": "Làm bài Toán 30 phút",
+        "coach": "Demo lựa chọn: Đồng ý / Chưa muốn giảm / Muốn tăng"
+      }
+    ]
   }
 ]
