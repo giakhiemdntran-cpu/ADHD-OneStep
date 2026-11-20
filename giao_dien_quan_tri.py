@@ -12,6 +12,7 @@ import streamlit as st
 
 from cau_hinh import DB_PATH, OLLAMA_MODEL, OLLAMA_URL, APP_TIMEZONE
 from quan_tri_huan_luyen_pcbm import hien_thi_quan_tri_huan_luyen_pcbm
+from pcbm_evidence_panel import render_pcbm_evidence
 
 API_BASE = os.getenv("ONESTEP_API_URL", "http://127.0.0.1:5000").rstrip("/")
 ADMIN_PASSWORD = os.getenv("ONESTEP_ADMIN_PASSWORD", "")
@@ -215,6 +216,7 @@ page = st.sidebar.radio(
         "👁️ Bộ nhớ đồ vật",
         "🤖 AI nhận thức cá nhân",
         "🧪 Quản trị huấn luyện PCBM",
+        "🛡️ Minh chứng & An toàn PCBM",
         "🔌 Kiểm thử API",
         "🗄️ Kho dữ liệu",
         "⚙️ Hệ thống",
@@ -654,6 +656,9 @@ elif page == "🤖 AI nhận thức cá nhân":
 elif page == "🧪 Quản trị huấn luyện PCBM":
     hien_thi_quan_tri_huan_luyen_pcbm()
 
+
+elif page == "🛡️ Minh chứng & An toàn PCBM":
+    render_pcbm_evidence()
 
 elif page == "🔌 Kiểm thử API":
     trang_tieu_de("🔌", "Kiểm thử API", "Công cụ kỹ thuật để kiểm tra các dịch vụ của OneStep.")

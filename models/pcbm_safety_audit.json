@@ -1,0 +1,69 @@
+{
+  "evaluated_at": "2026-11-20T11:39:06",
+  "source": "sqlite:pcbm_events",
+  "protocol": "global chronological 80/20 holdout",
+  "status": "retrospective_internal_holdout_NOT_independent",
+  "training_data_contains_demo_or_simulation": true,
+  "limitations": "No external/user-independent validation. No automatic support reduction authorized.",
+  "total_records": 4091,
+  "models": {
+    "y_recall_success": {
+      "available": true,
+      "model": "LogisticRegression (fixed baseline)",
+      "train_rows": 1800,
+      "test_rows": 451,
+      "first_test_time": "2026-09-19T20:43:00+07:00",
+      "last_test_time": "2026-10-02T21:42:00+07:00",
+      "positive_test_rate": 0.4789356984478936,
+      "accuracy": 0.7006651884700665,
+      "balanced_accuracy": 0.699290780141844,
+      "precision": 0.6956521739130435,
+      "recall": 0.6666666666666666,
+      "specificity": 0.7319148936170212,
+      "f1": 0.6808510638297872,
+      "confusion_matrix": [
+        [
+          172,
+          63
+        ],
+        [
+          72,
+          144
+        ]
+      ],
+      "brier_score": 0.19407601168708669,
+      "ece_10bin": 0.040097986006578136,
+      "pr_auc": 0.7588881788137363,
+      "roc_auc": 0.771946414499606
+    },
+    "y_complete_within_30m": {
+      "available": true,
+      "model": "LogisticRegression (fixed baseline)",
+      "train_rows": 3272,
+      "test_rows": 819,
+      "first_test_time": "2026-09-19T21:14:00+07:00",
+      "last_test_time": "2026-10-02T21:42:00+07:00",
+      "positive_test_rate": 0.1111111111111111,
+      "accuracy": 0.7643467643467643,
+      "balanced_accuracy": 0.7953296703296704,
+      "precision": 0.2992125984251969,
+      "recall": 0.8351648351648352,
+      "specificity": 0.7554945054945055,
+      "f1": 0.4405797101449275,
+      "confusion_matrix": [
+        [
+          550,
+          178
+        ],
+        [
+          15,
+          76
+        ]
+      ],
+      "brier_score": 0.14805808195242984,
+      "ece_10bin": 0.2070875211013545,
+      "pr_auc": 0.5320348036703009,
+      "roc_auc": 0.8910457674193938
+    }
+  }
+}
