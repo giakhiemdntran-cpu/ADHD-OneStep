@@ -1,0 +1,100 @@
+{
+  "schema_version": "PCBM-V5.2-EVIDENCE",
+  "source_db": "C:\\Users\\Admin\\Documents\\ADHD OneStep v11\\storage\\onestep.db",
+  "source_table": "pcbm_events",
+  "rows_events": 16693,
+  "rows_decisions": 8182,
+  "unique_users": 40,
+  "date_min": "2026-08-01T03:18:00+07:00",
+  "date_max": "2026-10-02T21:42:00+07:00",
+  "demo_records": 8182,
+  "non_demo_records": 0,
+  "status": "TECHNICAL_DEMO_ONLY",
+  "definitions": {
+    "y_cue_assisted_recall": "Explicit RECALL_SUCCESS/FAILURE within 2 minutes following a generic cue",
+    "y_independent_task_initiation": "Verified self-initiated start before first reminder; negative only with certified continuous observation",
+    "y_complete_within_30m_verified": "Completed within 30 minutes; negative only with certified full observation window"
+  },
+  "unknown_policy": "Missing evidence is Unknown, never silently 0",
+  "prediction_features": "Historical features generated strictly before anchor; exclude label/evidence/split columns",
+  "evaluation_protocols": "Separate user-group holdout and temporal holdout; not jointly independent; demo cannot validate real-world effectiveness",
+  "dataset_splits_by_user": {
+    "train": 24,
+    "validation": 8,
+    "test": 8
+  },
+  "targets": {
+    "y_cue_assisted_recall": {
+      "name": "Nhớ đúng sau gợi ý chung (2 phút)",
+      "positive": 1113,
+      "negative": 1138,
+      "unknown": 5931,
+      "by_user_split": {
+        "test": {
+          "positive": 245,
+          "negative": 194,
+          "unknown": 1269
+        },
+        "train": {
+          "positive": 731,
+          "negative": 651,
+          "unknown": 3494
+        },
+        "validation": {
+          "positive": 137,
+          "negative": 293,
+          "unknown": 1168
+        }
+      },
+      "rejected_missing_evidence": 0
+    },
+    "y_independent_task_initiation": {
+      "name": "Chủ động bắt đầu trước lời nhắc (ITI)",
+      "positive": 0,
+      "negative": 0,
+      "unknown": 8182,
+      "by_user_split": {
+        "test": {
+          "positive": 0,
+          "negative": 0,
+          "unknown": 1708
+        },
+        "train": {
+          "positive": 0,
+          "negative": 0,
+          "unknown": 4876
+        },
+        "validation": {
+          "positive": 0,
+          "negative": 0,
+          "unknown": 1598
+        }
+      },
+      "rejected_missing_evidence": 0
+    },
+    "y_complete_within_30m_verified": {
+      "name": "Hoàn thành trong 30 phút, nhãn có kiểm chứng",
+      "positive": 462,
+      "negative": 0,
+      "unknown": 7720,
+      "by_user_split": {
+        "test": {
+          "positive": 149,
+          "negative": 0,
+          "unknown": 1559
+        },
+        "train": {
+          "positive": 256,
+          "negative": 0,
+          "unknown": 4620
+        },
+        "validation": {
+          "positive": 57,
+          "negative": 0,
+          "unknown": 1541
+        }
+      },
+      "rejected_missing_evidence": 0
+    }
+  }
+}

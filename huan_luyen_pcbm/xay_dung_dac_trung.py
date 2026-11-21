@@ -61,60 +61,6 @@ def _streak_recall(history):
     ), last["timestamp"]
 
 
-# Event feedback được log bởi DieuPhoiPCBM.xu_ly_phan_hoi_muc_ho_tro()
-# Không coi accept/reject như nhãn recall hoặc completion.
-_SUPPORT_ACTIONS = {
-    "SUPPORT_ACCEPTED": "accept", "SUPPORT_REJECTED": "keep",
-    "SUPPORT_DEFERRED": "undecided", "SUPPORT_MORE_REQUESTED": "request_more",
-    "SUPPORT_LESS_REQUESTED": "request_less",
-}
-
-
-def tinh_dac_trung_y_kien(history, decision_time):
-    """Chỉ dùng feedback xảy ra TRƯỚC decision_time, tránh leakage.
-
-    Sự kiện giả lập DEMO không được sử dụng; các sự kiện thật chỉ là đặc trưng
-    lịch sử, không phải nhãn thành công hay sự cho phép tự động thay đổi Level.
-    """
-    recent=[]
-    for e in history:
-        timestamp=e.get("timestamp")
-        if timestamp is None or not decision_time-timedelta(days=30) <= timestamp < decision_time:
-            continue
-        if str(e.get("user_id", "")).upper().startswith("DEMO"):
-            continue
-        event_type=str(e.get("event_type", "")).upper()
-        if event_type not in _SUPPORT_ACTIONS:
-            continue
-        data=e.get("data") or {}
-        if data.get("is_demo") or data.get("simulation"):
-            continue
-        action=str(data.get("user_preference") or _SUPPORT_ACTIONS[event_type])
-        if action not in {"accept", "keep", "undecided", "request_more", "request_less"}:
-            continue
-        recent.append((timestamp, action, data))
-    recent.sort(key=lambda v:v[0])
-    counts={a:sum(x[1]==a for x in recent) for a in
-            ("accept", "keep", "undecided", "request_more", "request_less")}
-    last=recent[-1] if recent else None
-    level=None
-    if last:
-        try:
-            level=max(0,min(2,int(last[2].get("final_level"))))
-        except (TypeError,ValueError):
-            level=None
-    return {
-        "user_feedback_count_30d": len(recent),
-        "user_feedback_accept_rate_30d": (counts["accept"]/len(recent)) if recent else None,
-        "user_feedback_keep_count_30d": counts["keep"],
-        "user_feedback_more_count_30d": counts["request_more"],
-        "user_feedback_less_count_30d": counts["request_less"],
-        "user_feedback_last_action": last[1] if last else "none",
-        "user_feedback_last_final_level": level,
-        "user_feedback_age_days": (decision_time-last[0]).total_seconds()/86400 if last else None,
-    }
-
-
 def xay_dung_dac_trung(events, decision):
     """Xây đặc trưng PCBM v4 với ranh giới thời gian nghiêm ngặt.
 
@@ -173,13 +119,22 @@ def xay_dung_dac_trung(events, decision):
     if last_recall_time is not None:
         minutes_since_last_recall = max(0.0, (t - last_recall_time).total_seconds() / 60.0)
 
-    feedback_features=tinh_dac_trung_y_kien(history, t)
+    # Human-in-the-loop history BEFORE decision_time only; never used as a target label.
+    feedback_events = [e for e in hist_30d if e['event_type'] in
+                       {'SUPPORT_REVIEW_KEPT','SUPPORT_REVIEW_ACCEPTED','SUPPORT_REVIEW_DEFERRED',
+                        'REMINDER_FEEDBACK','SUPPORT_ACCEPTED'}]
+    choices = [e for e in feedback_events if e['event_type'] in
+               {'SUPPORT_REVIEW_KEPT','SUPPORT_REVIEW_ACCEPTED','SUPPORT_REVIEW_DEFERRED'}]
+    n_choices = len(choices)
+    keep_count = sum(e['event_type']=='SUPPORT_REVIEW_KEPT' for e in choices)
+    accept_count = sum(e['event_type']=='SUPPORT_REVIEW_ACCEPTED' for e in choices)
+    more_count = sum((e.get('data') or {}).get('feedback')=='too_little' for e in feedback_events)
+    less_count = sum((e.get('data') or {}).get('feedback')=='too_much' for e in feedback_events)
 
     hour = t.hour
     weekday = t.weekday()
 
     return {
-        **feedback_features,
         "user_id": user_id,
         "task_id": task_id,
         "occurrence_id": occ,
@@ -222,6 +177,11 @@ def xay_dung_dac_trung(events, decision):
         "same_task_recall_count": len(same_task_recall),
         "same_task_completion_rate": _an_toan_ty_le(len(same_task_completed & same_task_reminded), len(same_task_reminded)),
 
+        "user_feedback_review_count_30d": n_choices,
+        "user_feedback_keep_rate_30d": (keep_count / n_choices) if n_choices else None,
+        "user_feedback_accept_rate_30d": (accept_count / n_choices) if n_choices else None,
+        "user_feedback_more_count_30d": more_count,
+        "user_feedback_less_count_30d": less_count,
         "event_count_before": len(history),
         "history_days": history_days,
         "is_cold_start": int(len(history) < 10),

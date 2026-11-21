@@ -197,6 +197,26 @@ class DichVuNhiemVu:
 
             task_id = r["task_id"]
 
+        # Only a real user-initiated click, during a registered observation window
+        # and before any reminder, is evidence of independent task initiation.
+        # This captures BEHAVIOR, not an ADHD diagnosis or internal memory state.
+        independent_verified = False
+        try:
+            with lay_ket_noi_csdl() as c:
+                latest = c.execute("""SELECT id,created_at FROM pcbm_events
+                    WHERE user_id=? AND occurrence_id=? AND event_type='ITI_WINDOW_OPENED'
+                      AND created_at<=? ORDER BY created_at DESC,id DESC LIMIT 1""",
+                    (self.active_user_id,str(occurrence_id),now_s)).fetchone()
+                if latest:
+                    window_time=datetime.fromisoformat(latest['created_at'])
+                    any_cue=c.execute("""SELECT 1 FROM pcbm_events WHERE user_id=?
+                        AND occurrence_id=? AND event_type='REMINDER_SENT'
+                        AND created_at<=? LIMIT 1""",
+                        (self.active_user_id,str(occurrence_id),now_s)).fetchone()
+                    independent_verified=(not any_cue and 0 <= (now-window_time).total_seconds()<=1800)
+        except Exception:
+            independent_verified=False
+
         # Ghi sự kiện PCBM
         self.pcbm.ghi_su_kien(
             event_type="TASK_STARTED",
@@ -204,7 +224,9 @@ class DichVuNhiemVu:
             occurrence_id=occurrence_id,
             user_id=self.active_user_id,
             data={
-                "start_delay_minutes": round(delay, 2)
+                "start_delay_minutes": round(delay, 2),
+                "source": "user_action", "trigger": "self_initiated" if independent_verified else "unknown",
+                "independent_verified": bool(independent_verified),
             }
         )
 

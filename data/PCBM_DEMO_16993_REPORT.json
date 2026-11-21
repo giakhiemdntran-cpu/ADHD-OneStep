@@ -1,0 +1,82 @@
+{
+  "dataset_type": "SYNTHETIC_DEMO_ONLY",
+  "event_count": 16993,
+  "users": 40,
+  "occurrences": 2560,
+  "target_records": 5120,
+  "method": "walk_forward (synthetic only)",
+  "models": {
+    "Cue-assisted Recall": {
+      "selected_algorithm": "LogisticRegression",
+      "labeled_rows": 2560,
+      "labels": {
+        "0": 1258,
+        "1": 1302,
+        "unknown": 2560
+      },
+      "roc_auc": 0.6934722222222223,
+      "pr_auc": 0.6803126466930952,
+      "recall": 0.6708333333333333,
+      "f1": 0.6475615887380594,
+      "balanced_accuracy": 0.6348958333333333,
+      "confusion_matrix": [
+        [
+          575,
+          385
+        ],
+        [
+          316,
+          644
+        ]
+      ]
+    },
+    "Completion 30m verified": {
+      "selected_algorithm": "RandomForestClassifier",
+      "labeled_rows": 2560,
+      "labels": {
+        "0": 1240,
+        "1": 1320,
+        "unknown": 2560
+      },
+      "roc_auc": 0.6914460484462932,
+      "pr_auc": 0.6780055332710041,
+      "recall": 0.7323383084577114,
+      "f1": 0.6891385767790262,
+      "balanced_accuracy": 0.6503221596933366,
+      "confusion_matrix": [
+        [
+          520,
+          395
+        ],
+        [
+          269,
+          736
+        ]
+      ]
+    },
+    "Independent Task Initiation": {
+      "selected_algorithm": "LogisticRegression",
+      "labeled_rows": 2560,
+      "labels": {
+        "0": 1438,
+        "1": 1122,
+        "unknown": 2560
+      },
+      "roc_auc": 0.7001628334339566,
+      "pr_auc": 0.613125379653855,
+      "recall": 0.6092636579572447,
+      "f1": 0.6007025761124122,
+      "balanced_accuracy": 0.64090270096378,
+      "confusion_matrix": [
+        [
+          725,
+          353
+        ],
+        [
+          329,
+          513
+        ]
+      ]
+    }
+  }
+}

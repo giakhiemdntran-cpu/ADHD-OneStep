@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import joblib
@@ -30,17 +31,18 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from huan_luyen_pcbm.xay_dung_du_lieu import xay_dung_ban_ghi_hoc
 
-TRAINING_VERSION = "PCBM"
+TRAINING_VERSION = "PCBM-label-v5"
 MODEL_SELECTION_METRIC = "pr_auc"
 
 DROP_COLUMNS = {
     "user_id", "occurrence_id", "decision_time", "feature_schema_version",
-    "label_schema_version", "pipeline_version",
+    "label_schema_version", "pipeline_version", "decision_event_type",
 }
 ALL_LABELS = {
     "y_recall_success", "y_started_within_10m", "y_start_delay_minutes",
     "y_complete_within_30m", "y_complete_within_60m",
     "y_completion_delay_minutes", "y_snooze", "y_forgot",
+    "y_cue_assisted_recall", "y_independent_task_initiation", "y_complete_within_30m_verified",
 }
 
 
@@ -53,6 +55,8 @@ def dong_sang_su_kien(rows):
             data = {}
         try:
             ts = pd.Timestamp(r["created_at"]).to_pydatetime()
+            if ts.tzinfo is not None:
+                ts = ts.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).replace(tzinfo=None)
         except Exception:
             continue
         events.append({
@@ -178,6 +182,41 @@ def _metrics(y_true, pred, prob):
     return out
 
 
+
+
+def _chon_nguong_tu_qua_khu(base_pipe, X_train, y_train):
+    """Tune threshold on historical TRAIN segment only; never look at test labels.
+
+    Uses the last 25% of train for threshold selection; if insufficient,
+    returns 0.5. The chosen threshold is frozen before seeing the next fold.
+    """
+    y_train = pd.Series(y_train).reset_index(drop=True)
+    size = len(y_train)
+    cut = int(size * 0.75)
+    if cut < 35 or size - cut < 15 or y_train.iloc[:cut].nunique() < 2 or y_train.iloc[cut:].nunique() < 2:
+        return 0.5
+    probe = clone(base_pipe)
+    probe.fit(X_train.iloc[:cut], y_train.iloc[:cut])
+    p = _xac_suat_lop_1(probe, X_train.iloc[cut:])
+    y = y_train.iloc[cut:].to_numpy(dtype=int)
+    # The business cost is missing completion: constrain both sensitivity
+    # and specificity so lowering threshold cannot blindly mark all as 1.
+    eligible=[]
+    for thr in np.linspace(0.15, 0.85, 71):
+        pred = (p >= thr).astype(int)
+        tp = int(((y == 1) & (pred == 1)).sum())
+        fn = int(((y == 1) & (pred == 0)).sum())
+        tn = int(((y == 0) & (pred == 0)).sum())
+        fp = int(((y == 0) & (pred == 1)).sum())
+        recall = tp / (tp + fn) if tp + fn else 0
+        specificity = tn / (tn + fp) if tn + fp else 0
+        if recall >= 0.50 and specificity >= 0.50:
+            eligible.append((f1_score(y, pred, zero_division=0),
+                             balanced_accuracy_score(y, pred), -abs(thr-0.5), float(thr)))
+    if not eligible:
+        return 0.5
+    return max(eligible)[-1]
+
 def _danh_gia_walk_forward(work, feature_cols, target, n_splits=3):
     work = work.sort_values("decision_time").reset_index(drop=True)
     if len(work) < 30:
@@ -207,15 +246,20 @@ def _danh_gia_walk_forward(work, feature_cols, target, n_splits=3):
             if y_train.nunique() < 2:
                 folds.append({"fold": fold_no, "skipped": True, "reason": "train_one_class"})
                 continue
+            # Completion: optimize decision threshold on the PAST ONLY.
+            threshold = (_chon_nguong_tu_qua_khu(base_pipe, X_train, y_train)
+                         if target in {"y_complete_within_30m", "y_complete_within_30m_verified"}
+                         else 0.5)
             pipe = clone(base_pipe)
             pipe.fit(X_train, y_train)
-            pred = pipe.predict(X_test)
             prob = _xac_suat_lop_1(pipe, X_test)
+            pred = (prob >= threshold).astype(int)
             m = _metrics(y_test, pred, prob)
             folds.append({
                 "fold": fold_no,
                 "train_rows": int(len(train_idx)),
                 "test_rows": int(len(test_idx)),
+                "decision_threshold": float(threshold),
                 **m,
             })
             ys.extend(y_test.tolist())
@@ -235,6 +279,7 @@ def _danh_gia_walk_forward(work, feature_cols, target, n_splits=3):
         leaderboard.append({
             "model": name,
             "available": True,
+            "thresholds_by_fold": [f.get("decision_threshold") for f in folds if not f.get("skipped")],
             "fold_count": int(sum(not f.get("skipped", False) for f in folds)),
             "test_rows": int(len(ys)),
             "folds": folds,
@@ -256,16 +301,27 @@ def _danh_gia_walk_forward(work, feature_cols, target, n_splits=3):
             x.get("f1", -1.0),
         )
 
-    best = max(valid, key=rank_key)
+    # Completion uses an operationally meaningful selection criterion.
+    # Keep PR-AUC within 0.03 of the best to avoid discarding ranking quality,
+    # then prefer a higher F1 and balanced accuracy. Recall unchanged.
+    is_completion = target in {"y_complete_within_30m", "y_complete_within_30m_verified"}
+    if is_completion:
+        top_pr = max((x.get("pr_auc") if x.get("pr_auc") is not None else -1) for x in valid)
+        shortlist = [x for x in valid if (x.get("pr_auc") or -1) >= top_pr - 0.03]
+        best = max(shortlist, key=lambda x: (x.get("f1", 0), x.get("balanced_accuracy", 0), x.get("pr_auc", -1)))
+    else:
+        best = max(valid, key=rank_key)
     final_train_rows = int(len(work) - max(1, len(work) // (n_splits + 1)))
     evaluation = {
         "available": True,
         "method": "walk_forward_time_series",
-        "selection_metric": MODEL_SELECTION_METRIC,
+        "selection_metric": "f1_with_pr_auc_guard_0.03" if is_completion else MODEL_SELECTION_METRIC,
+        "threshold_policy": "past_training_only_f1_with_recall_specificity_floor_0.50" if is_completion else "fixed_0.5",
         "n_splits": n_splits,
         "train_rows": final_train_rows,
         "test_rows": best["test_rows"],
         "selected_model": best["model"],
+        "decision_thresholds_by_fold": best.get("thresholds_by_fold", []),
         "accuracy": best["accuracy"],
         "balanced_accuracy": best["balanced_accuracy"],
         "precision": best["precision"],
@@ -300,9 +356,14 @@ def _huan_luyen_cuoi(df, target, source):
         selected_model = "RandomForestClassifier"
     candidates = _ung_vien(feature_cols, X)
     pipe = candidates[selected_model]
+    # Final training threshold estimated without peeking into future/test folds.
+    chosen_threshold = (_chon_nguong_tu_qua_khu(pipe, X, y)
+                        if target in {"y_complete_within_30m", "y_complete_within_30m_verified"}
+                        else 0.5)
     pipe.fit(X, y)
 
     bundle = {
+        "decision_threshold": float(chosen_threshold),
         "pipeline": pipe,
         "feature_columns": feature_cols,
         "target": target,
@@ -315,6 +376,27 @@ def _huan_luyen_cuoi(df, target, source):
         "evaluation": evaluation,
     }
     return bundle
+
+
+def _huan_luyen_neu_du(df, target, source, path):
+    """Reuse exact four-candidate v4 trainer; never create one-class classifiers."""
+    values = df[target].dropna() if target in df else pd.Series(dtype=float)
+    counts = {"0": int((values == 0).sum()), "1": int((values == 1).sum()),
+              "unknown": int(len(df) - len(values))}
+    if len(values) < 30 or counts["0"] == 0 or counts["1"] == 0:
+        why = ("no_verified_labels" if len(values) == 0 else
+               "single_class" if min(counts["0"], counts["1"]) == 0 else "too_few_rows")
+        return {"available": False, "reason": why, "counts": counts, "path": None}
+    try:
+        bundle = _huan_luyen_cuoi(df, target, source)
+        joblib.dump(bundle, path)
+        return {"available": True, "counts": counts, "path": str(path),
+                "model_name": bundle["model_name"], "training_rows": bundle["training_rows"],
+        "decision_threshold": bundle.get("decision_threshold", 0.5),
+                "positive_rate": bundle["positive_rate"], "evaluation": bundle["evaluation"]}
+    except Exception as exc:
+        return {"available": False, "reason": "training_error", "error": str(exc),
+                "counts": counts, "path": None}
 
 
 def huan_luyen_tu_sqlite_dong(rows, model_dir: Path):
@@ -330,13 +412,12 @@ def huan_luyen_tu_sqlite_dong(rows, model_dir: Path):
     model_dir.mkdir(parents=True, exist_ok=True)
     source = "sqlite:pcbm_events"
 
-    recall = _huan_luyen_cuoi(df, "y_recall_success", source)
-    completion = _huan_luyen_cuoi(df, "y_complete_within_30m", source)
-
-    recall_path = model_dir / "pcbm_recall.joblib"
-    completion_path = model_dir / "pcbm_completion.joblib"
-    joblib.dump(recall, recall_path)
-    joblib.dump(completion, completion_path)
+    recall_result = _huan_luyen_neu_du(df, "y_cue_assisted_recall", source,
+                                      model_dir / "pcbm_recall_v5.joblib")
+    completion_result = _huan_luyen_neu_du(df, "y_complete_within_30m_verified", source,
+                                          model_dir / "pcbm_completion_v5.joblib")
+    iti_result = _huan_luyen_neu_du(df, "y_independent_task_initiation", source,
+                                   model_dir / "pcbm_iti_v5.joblib")
 
     users = sorted({e["user_id"] for e in events})
     recall_rows = int(df["y_recall_success"].notna().sum())
@@ -345,35 +426,21 @@ def huan_luyen_tu_sqlite_dong(rows, model_dir: Path):
         "training_version": TRAINING_VERSION,
         "source": source,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
-        "events": int(len(events)),
-        "records": int(len(df)),
-        "users": int(len(users)),
-        "user_ids": users,
+        "events": int(len(events)), "records": int(len(df)),
+        "users": int(len(users)), "user_ids": users,
         "dataset_summary": {
             "generic_cue_records": generic_rows,
             "recall_labeled_records": recall_rows,
-            "recall_label_definition": "RECALL_SUCCESS/FAILURE within 2 minutes after generic cue only",
+            "recall_label_definition": "Explicit RECALL_SUCCESS/FAILURE within 2 min of generic cue",
+            "iti_label_definition": "Verified unprompted start before reminder; otherwise unknown unless complete observation",
+            "completion_label_definition": "TASK_COMPLETED within 30m; negative only after verified full observation",
         },
-        "recall_model": {
-            "path": str(recall_path),
-            "model_name": recall["model_name"],
-            "training_rows": recall["training_rows"],
-            "positive_rate": recall["positive_rate"],
-            "evaluation": recall["evaluation"],
-        },
-        "completion_model": {
-            "path": str(completion_path),
-            "model_name": completion["model_name"],
-            "training_rows": completion["training_rows"],
-            "positive_rate": completion["positive_rate"],
-            "evaluation": completion["evaluation"],
-        },
-        "note": (
-            "PCBM: recall label chỉ sau generic cue; bổ sung recall 1/3/7 ngày, streak, same-task và feedback; "
-            "walk-forward validation; so sánh Dummy/Logistic/RandomForest/GradientBoosting; đánh giá PR-AUC, F1 và calibration."
-        ),
+        "recall_model": recall_result,
+        "completion_model": completion_result,
+        "iti_model": iti_result,
+        "note": "Four v4 algorithms and walk-forward retained; v5 models isolated from deployed Buddy; test/demo data is not independent evidence.",
     }
-    (model_dir / "pcbm_model_meta.json").write_text(
+    (model_dir / "pcbm_v5_model_meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return meta

@@ -619,53 +619,87 @@ def hien_thi_quan_tri_huan_luyen_pcbm():
             st.error(f"Không tạo được training records: {e}")
 
     with tab_train:
-        st.subheader("Huấn luyện trực tiếp từ pcbm_events")
-        st.warning("Nút này đọc SQLite, tạo feature/label, train model và ghi .joblib trực tiếp. Flask API không được gọi.")
-        recall_bundle, recall_load_error = _safe_load_bundle(PCBM_RECALL_MODEL)
-        completion_bundle, completion_load_error = _safe_load_bundle(PCBM_COMPLETION_MODEL)
-        _show_model_load_warning("Recall", recall_load_error)
-        _show_model_load_warning("Completion 30m", completion_load_error)
-        _show_model_summary("Mô hình Recall hiện tại", recall_bundle)
-        _show_leaderboard("So sánh 4 mô hình Recall", recall_bundle)
-        _show_model_summary("Mô hình Completion 30m hiện tại", completion_bundle)
-        _show_leaderboard("So sánh 4 mô hình Completion 30m", completion_bundle)
-        _show_confusion_matrix("Recall", recall_bundle)
-        _show_confusion_matrix("Completion 30m", completion_bundle)
-        _show_feedback_training_info()
-        st.markdown("##### Từ dự đoán đến quyết định mức hỗ trợ")
-        st.caption("Theo quy tắc hiện tại trong dich_vu_pcbm.py: Recall >= 0.80 -> "
-                   "đề xuất giảm 1 Level; Recall < 0.45 -> đề xuất tăng 1 Level; "
-                   "còn lại -> giữ nguyên. Xác suất Completion là chỉ số bổ sung, "
-                   "không trực tiếp quyết định Level trong quy tắc này.")
-        st.warning("Các ngưỡng 0.80/0.45 là quy tắc vận hành đang thử nghiệm, "
-                   "không được suy ra từ confusion matrix. Dù AI đề xuất giảm, "
-                   "Human-in-the-loop vẫn chặn tự giảm khi thiếu kiểm chứng độc lập; "
-                   "người dùng có thể từ chối và giữ nguyên mức hỗ trợ.")
+        st.subheader("Huấn luyện PCBM v5 – Recall, Completion 30m và ITI (16.993 sự kiện DEMO)")
+        st.caption("Giữ nguyên 4 thuật toán và walk-forward của v4. Một nút chạy đủ 3 mục tiêu; "
+                   "nếu thiếu nhãn xác minh, mô hình tương ứng được TRÌNH DIỄN bằng SQLite MÔ PHỎNG riêng.")
+        st.warning("Dữ liệu mô phỏng chỉ phục vụ trình diễn pipeline, KHÔNG chứng minh hiệu quả trên học sinh thật.")
 
-        if st.session_state.pop("pcbm_train_success", None):
-            st.success("Huấn luyện PCBM thành công. Hai model đang triển khai và leaderboard đã được cập nhật.")
-
-        confirm_train = st.checkbox("Tôi xác nhận ghi đè hai model hiện tại khi huấn luyện thành công.", key="pcbm_confirm_train")
-        if st.button("🚀 Train PCBM từ SQLite", type="primary", disabled=not confirm_train, use_container_width=True):
+        # Đặt nút ngay trước bảng kết quả; không buộc tìm bảng ở đầu trang
+        if st.button("🚀 Tạo 16.993 sự kiện DEMO và huấn luyện 3 mô hình PCBM", type="primary",
+                     key="pcbm_v56_train_3", use_container_width=True):
             try:
-                rows = _event_rows()
-                with st.spinner("Đang chạy PCBM: feature engineering → labeling → walk-forward → so sánh 4 mô hình → chọn model → final fit..."):
-                    meta = huan_luyen_tu_sqlite_dong(rows, Path(PCBM_RECALL_MODEL).parent)
-                    run_id = _save_training_run(meta)
-                    # Save an inspectable training-record snapshot next to the dataset.
-                    df = _training_df(refresh=True)
-                    TRAINING_CSV.parent.mkdir(parents=True, exist_ok=True)
-                    df.to_csv(TRAINING_CSV, index=False)
-                st.session_state["pcbm_direct_train_meta"] = meta
-                st.session_state["pcbm_train_success"] = True
-                st.rerun()
-            except Exception as e:
-                st.error(f"Huấn luyện thất bại: {e}")
+                from huan_luyen_pcbm.pcbm_demo_v5 import tao_sqlite_demo
+                demo_db = Path(__file__).resolve().parent / "data" / "pcbm_v5_DEMO_ONLY.db"
+                demo_dir = Path(PCBM_RECALL_MODEL).parent / "v5_demo_models"
+                with st.spinner("Tạo SQLite mô phỏng; train 3 mục tiêu × 4 thuật toán; đánh giá walk-forward..."):
+                    n = tao_sqlite_demo(demo_db, n_users=40, n_tasks=64, target_events=16993)
+                    with sqlite3.connect(demo_db) as con:
+                        con.row_factory = sqlite3.Row
+                        demo_rows = con.execute("SELECT * FROM pcbm_events ORDER BY user_id, created_at, id").fetchall()
+                    demo_meta = huan_luyen_tu_sqlite_dong(demo_rows, demo_dir)
+                    missing_demo = [k for k in ("recall_model", "completion_model", "iti_model")
+                                    if not (demo_meta.get(k) or {}).get("available")]
+                    if missing_demo:
+                        raise RuntimeError("Dữ liệu DEMO không train đủ 3 mục tiêu: " + ", ".join(missing_demo))
+                    st.session_state["pcbm_v56_demo_ready"] = True
+                    st.session_state["pcbm_v56_demo_info"] = {"events": n, "meta": demo_meta}
+                    # Dữ liệu hiện có được train song song, không ảnh hưởng model đang vận hành
+                    try:
+                        real_rows = _event_rows()
+                        real_dir = Path(PCBM_RECALL_MODEL).parent / "v5_label_models"
+                        st.session_state["pcbm_v56_real_meta"] = (
+                            huan_luyen_tu_sqlite_dong(real_rows, real_dir) if real_rows else None)
+                        st.session_state["pcbm_v56_real_error"] = None
+                    except Exception as real_exc:
+                        st.session_state["pcbm_v56_real_meta"] = None
+                        st.session_state["pcbm_v56_real_error"] = str(real_exc)
+                st.success(f"Đã tạo {n:,} sự kiện DEMO và huấn luyện đủ 3 mục tiêu. Bảng kết quả nằm ngay bên dưới.")
+            except Exception as exc:
+                st.session_state["pcbm_v56_demo_ready"] = False
+                st.error(f"Lần huấn luyện chưa hoàn thành: {exc}")
 
-        meta = st.session_state.get("pcbm_direct_train_meta")
-        if meta:
-            with st.expander("Chi tiết kỹ thuật lần huấn luyện gần nhất"):
-                st.json(meta)
+        demo_dir = Path(PCBM_RECALL_MODEL).parent / "v5_demo_models"
+        real_dir = Path(PCBM_RECALL_MODEL).parent / "v5_label_models"
+        targets = [
+            ("Recall – nhớ sau generic cue", "pcbm_recall_v5.joblib"),
+            ("Completion 30m", "pcbm_completion_v5.joblib"),
+            ("ITI – chủ động bắt đầu trước lời nhắc", "pcbm_iti_v5.joblib"),
+        ]
+        # Chỉ hiện kết quả nếu đã nhấn Train trong phiên này. Tránh đọc model demo cũ
+        # khiến người xem nhầm với kết quả của lần chạy hiện hành.
+        if st.session_state.get("pcbm_v56_demo_ready"):
+            st.markdown("### Kết quả huấn luyện – 3 mục tiêu")
+            st.caption("Mỗi mục tiêu hiển thị một bảng so sánh bốn thuật toán và Confusion Matrix; "
+                       "nhãn nguồn dữ liệu được ghi ngay trong tiêu đề.")
+            real_meta = st.session_state.get("pcbm_v56_real_meta") or {}
+            mapping = ("recall_model", "completion_model", "iti_model")
+            for (name, filename), key in zip(targets, mapping):
+                real_ok = bool((real_meta.get(key) or {}).get("available"))
+                candidate = real_dir / filename if real_ok else demo_dir / filename
+                bundle, err = _safe_load_bundle(candidate)
+                source_name = "SQLITE HIỆN TẠI" if real_ok else "DEMO MÔ PHỎNG"
+                st.markdown(f"#### {name} — {source_name}")
+                if not real_ok:
+                    reason = (real_meta.get(key) or {}).get("reason", "chưa có dữ liệu thực đủ điều kiện")
+                    st.caption("Sử dụng bộ dữ liệu tổng hợp tách riêng để trình diễn vì SQLite hiện tại: "
+                               + str(reason) + ". KHÔNG phải số liệu thực nghiệm.")
+                if bundle:
+                    st.markdown(f"**Thuật toán được chọn:** `{bundle.get('model_name','N/A')}`")
+                    _show_leaderboard("So sánh 4 mô hình – " + name, bundle)
+                    _show_confusion_matrix(name + " (" + source_name + ")", bundle)
+                else:
+                    st.error(f"Không đọc được kết quả {name}: {err}")
+                st.divider()
+            with st.expander("Chi tiết lần train và nguồn dữ liệu"):
+                st.json({"real": real_meta,
+                         "demo": (st.session_state.get("pcbm_v56_demo_info") or {}).get("meta"),
+                         "real_error": st.session_state.get("pcbm_v56_real_error")})
+        else:
+            st.info("Nhấn nút Train phía trên để tạo dataset DEMO và hiện ngay đủ 3 bảng so sánh + 3 Confusion Matrix.")
+
+        with st.expander("📝 Thu thập bằng chứng thật cho ITI / Completion (tùy chọn)"):
+            from pcbm_thu_thap_bang_chung import hien_thi_thu_thap_bang_chung
+            hien_thi_thu_thap_bang_chung(DB_PATH)
 
     with tab_test:
         st.subheader("Test model trực tiếp")

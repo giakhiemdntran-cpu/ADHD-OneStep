@@ -6,9 +6,9 @@ import pandas as pd
 from huan_luyen_pcbm.xay_dung_dac_trung import xay_dung_dac_trung
 from huan_luyen_pcbm.xay_dung_nhan import xay_dung_nhan
 
-PIPELINE_VERSION = "pcbm-training-v4"
+PIPELINE_VERSION = "pcbm-training-v5-target-only"
 FEATURE_SCHEMA_VERSION = "4.0"
-LABEL_SCHEMA_VERSION = "4.0"
+LABEL_SCHEMA_VERSION = "5.0"
 
 def tai_du_lieu_jsonl(path):
     events = []
@@ -38,11 +38,12 @@ def xay_dung_ban_ghi_hoc(events):
     rows = []
     for user_id, user_events in events_by_user.items():
         user_events.sort(key=lambda x: (x["timestamp"], x["event_id"]))
-        decisions = [e for e in user_events if e["event_type"] == "REMINDER_SENT"]
+        decisions = [e for e in user_events if e["event_type"] in {"REMINDER_SENT", "ITI_WINDOW_OPENED"}]
         for d in decisions:
             row = {}
             row.update(xay_dung_dac_trung(user_events, d))
             row.update(xay_dung_nhan(user_events, d))
+            row["decision_event_type"] = d["event_type"]
             row["feature_schema_version"] = FEATURE_SCHEMA_VERSION
             row["label_schema_version"] = LABEL_SCHEMA_VERSION
             row["pipeline_version"] = PIPELINE_VERSION
