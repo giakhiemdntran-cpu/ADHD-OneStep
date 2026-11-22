@@ -100,6 +100,55 @@ class DemoCoachingManager:
         self.last_result = None
         return self._evaluate()
 
+    def start_support_review(self, profile_id):
+        """Kịch bản D: đủ điều kiện *giả lập* để hỏi ý kiến về Level.
+
+        Không thay đổi cấu hình PCBM, sự kiện hay database người dùng thật.
+        """
+        self.reset(profile_id)
+        self.active = True
+        self.state = "support_review"
+        self.demo_selected_level = self.base_level
+        self.demo_review_action = None
+        return {
+            "demo": True,
+            "demo_status": "🎬 DEMO hỗ trợ • Level 1 → AI đề xuất Level 0 (chờ ý kiến)",
+        }
+
+    def finish_support_review(self, action, selected_level=None):
+        """Cập nhật quyết định trong bộ nhớ demo, không ghi database."""
+        if self.profile_id != "DEMO_HITL_REVIEW":
+            raise ValueError("Chỉ dùng cho hồ sơ D")
+        old = int(self.base_level)
+        suggested = 0
+        if action == "accept":
+            level = suggested
+            explanation = "Em đồng ý thử đề xuất của AI: Level 1 → Level 0."
+        elif action == "selected":
+            level = int(selected_level)
+            if level not in (0, 1, 2):
+                raise ValueError("Level phải thuộc 0, 1, 2")
+            explanation = f"Em chọn thử Level {level}."
+        elif action == "keep":
+            level = old
+            explanation = "Em muốn giữ nguyên Level 1; Buddy tôn trọng lựa chọn này."
+        else:
+            action = "later"
+            level = old
+            explanation = "Em chọn để sau, Buddy giữ nguyên Level 1."
+        self.demo_selected_level = level
+        self.demo_review_action = action
+        self.state = "review_done"
+        status = f"🎬 DEMO hỗ trợ • Level {old} → Level {level} ({action})"
+        return {
+            "demo": True,
+            "demo_status": status,
+            "reply": (
+                explanation + " Đây chỉ là tình huống mô phỏng; mức hỗ trợ thật không thay đổi. "
+                "Khi áp dụng thật, đề xuất giảm vẫn phải qua kiểm định an toàn và được người dùng đồng ý."
+            ),
+        }
+
     def start(self, profile_id):
         self.reset(profile_id)
         self.active = True
@@ -137,6 +186,10 @@ class DemoCoachingManager:
         t = (text or "").strip().lower()
         if any(x in t for x in ("dừng demo", "thoát demo", "kết thúc demo")):
             return self.stop()
+
+        if self.state in {"support_review", "review_done"}:
+            return {"reply": "Đây là demo lựa chọn mức hỗ trợ. Mở lại Demo và chọn hồ sơ D để thử lựa chọn khác.",
+                    "state": "idle", "demo": True}
 
         if self.state == "wait_recall":
             if any(x in t for x in ("toán", "bài toán", "làm bài")):

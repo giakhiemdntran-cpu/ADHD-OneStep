@@ -28,6 +28,7 @@ from tro_ly.bo_dinh_tuyen_y_dinh import BoDinhTuyenYDinh
 from tro_ly.cua_so_cai_dat import CuaSoCaiDat
 from tro_ly.cua_so_tro_giup import CuaSoTroGiup
 from tro_ly.cua_so_demo_coaching import CuaSoDemoCoaching
+from tro_ly.cua_so_demo_muc_ho_tro import CuaSoDemoMucHoTro
 from dich_vu.demo_coaching import DemoCoachingManager
 from dich_vu.coaching_actions import CoachingActionStore
 from tro_ly.daily_coaching_widget import DailyCoachingWidget
@@ -132,6 +133,7 @@ class CuaSoTroLy(QWidget):
         # Riêng demo: không dùng database nhiệm vụ thật.
         self.demo_daily_store = CoachingActionStore(Path(BASE_DIR) / "demo_coaching" / "daily_actions.sqlite3")
         self._demo_reminder_seen = set()
+        self._demo_cho_mo_bang_ho_tro = False
         self._support_text_full = "Đang tải trạng thái PCBM..."
         self._daily_text_full = ""
         self.dich_vu_vong_deo.dam_bao_luoc_do()
@@ -628,6 +630,7 @@ class CuaSoTroLy(QWidget):
         self._refresh_layout_after_mode_change()
 
     def reset_demo_coaching(self, profile_id):
+        self._demo_cho_mo_bang_ho_tro = False
         r = self.demo_coaching.reset(profile_id)
         self.demo_daily_store.reset_user(profile_id)
         self._demo_reminder_seen = {k for k in self._demo_reminder_seen if k[0] != profile_id}
@@ -638,6 +641,26 @@ class CuaSoTroLy(QWidget):
         self._refresh_layout_after_mode_change()
 
     def bat_dau_demo_coaching(self, profile_id):
+        # Hồ sơ D minh họa Human-in-the-Loop: hỏi mức hỗ trợ trước,
+        # tuyệt đối không chạy generic cue hoặc ghi vào DB thật.
+        if profile_id == "DEMO_HITL_REVIEW":
+            r = self.demo_coaching.start_support_review(profile_id)
+            self._set_support_text(r["demo_status"])
+            self.nhan_chat_muc_ho_tro.setText(r["demo_status"])
+            self.nhan_goi_y_trong_ngay.show()
+            self.cap_nhat_daily_coaching_plan()
+            self._refresh_layout_after_mode_change()
+            # Buddy THÔNG BÁO BẰNG GIỌNG NÓI TRƯỚC. Khi TTS kết thúc,
+            # callback khi_doc_giong_noi_xong() sẽ mở bảng lựa chọn.
+            self._demo_cho_mo_bang_ho_tro = True
+            self.noi(
+                "Buddy đã xem xét lịch sử hoạt động trong tình huống mô phỏng. "
+                "Em đã đạt điều kiện để xem xét điều chỉnh mức hỗ trợ. "
+                "Buddy đề xuất thử giảm từ mức một xuống mức không, để em chủ động hơn. "
+                "Em có muốn thử theo đề xuất, giữ nguyên hay chọn mức hỗ trợ khác không?",
+                "idle",
+            )
+            return
         r = self.demo_coaching.start(profile_id)
         status = r.get("demo_status") or self.demo_coaching.status_text()
         self._set_support_text(status)
@@ -647,6 +670,22 @@ class CuaSoTroLy(QWidget):
         self.dat_trang_thai("idle", r.get("reply", ""))
         self._refresh_layout_after_mode_change()
         self.noi(r.get("reply", ""), "idle")
+
+    def mo_bang_demo_muc_ho_tro(self):
+        """Bảng chọn hỗ trợ cho hồ sơ D – chỉ chạy trên dữ liệu giả lập."""
+        if self.demo_coaching.profile_id != "DEMO_HITL_REVIEW" or not self.demo_coaching.active:
+            return
+        dialog = CuaSoDemoMucHoTro(current_level=1, proposed_level=0, parent=self)
+        dialog.exec()
+        action = dialog.action or "later"
+        result = self.demo_coaching.finish_support_review(
+            action, selected_level=dialog.selected_level
+        )
+        status = result["demo_status"]
+        self._set_support_text(status)
+        self.nhan_chat_muc_ho_tro.setText(status)
+        self.dat_trang_thai("idle", result["reply"])
+        self.noi(result["reply"], "idle")
 
     def _xu_ly_demo_neu_can(self, text):
         if not getattr(self, "demo_coaching", None) or not self.demo_coaching.active:
@@ -1271,6 +1310,11 @@ class CuaSoTroLy(QWidget):
             return
 
         self.dat_trang_thai(self._after, "Mình đang sẵn sàng.")
+        # Không mở microphone hoặc hiện hộp thoại trước khi Buddy nói xong.
+        if self._demo_cho_mo_bang_ho_tro:
+            self._demo_cho_mo_bang_ho_tro = False
+            QTimer.singleShot(200, self.mo_bang_demo_muc_ho_tro)
+            return
         if AUTO_LISTEN:
             # DichVuDocGiongNoi đã nhả ALSA; chờ thêm một khoảng ngắn
             # trước khi PortAudio mở lại microphone.
