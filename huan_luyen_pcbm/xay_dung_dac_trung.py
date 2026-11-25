@@ -1,6 +1,37 @@
 from __future__ import annotations
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import math
+
+
+# Timestamp in older OneStep SQLite records may omit a timezone while imported
+# records may use Z/+00:00. Historical naive values were written in local VN time.
+# Normalize only the copies passed to the feature builder: never rewrite SQLite.
+_VN_TZ = timezone(timedelta(hours=7))
+
+
+def _vn_aware_timestamp(value):
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if not isinstance(value, datetime):
+        raise TypeError(f"PCBM timestamp is not datetime: {type(value).__name__}")
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=_VN_TZ)
+    return value.astimezone(_VN_TZ)
+
+
+def _normalise_feature_times(events, decision):
+    safe_decision = dict(decision)
+    safe_decision["timestamp"] = _vn_aware_timestamp(decision["timestamp"])
+    safe_events = []
+    for e in events:
+        if e.get("user_id") != decision.get("user_id"):
+            continue
+        item = dict(e)
+        item["timestamp"] = _vn_aware_timestamp(e["timestamp"])
+        safe_events.append(item)
+    return safe_events, safe_decision
 
 
 def thoi_gian_cua_ngay(hour: int) -> str:
@@ -67,6 +98,9 @@ def xay_dung_dac_trung(events, decision):
     Tất cả đặc trưng lịch sử chỉ dùng sự kiện xảy ra trước decision_time để tránh leakage.
     v4 bổ sung tín hiệu recall 1/3/7 ngày, streak, cùng nhiệm vụ và feedback gần nhất.
     """
+    # Keep legacy naive (+07 local clock) and timezone-aware imported events
+    # comparable before the FIRST time comparison; does not modify input data.
+    events, decision = _normalise_feature_times(events, decision)
     t = decision["timestamp"]
     user_id = decision["user_id"]
     task_id = decision["task_id"]
