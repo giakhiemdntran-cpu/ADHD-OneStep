@@ -104,29 +104,31 @@ class DichVuDocGiongNoi:
                 on_done()
 
     def _noi_voi_fallback(self, text):
+        # VieNeu-only mode: consistent Mai Anh voice; NEVER switch to Edge/pyttsx3.
         if TTS_ENGINE == "vieneu":
             try:
                 self._vieneu_stream(text)
                 return
             except VieNeuStreamError as e:
                 print("[VIENEU TTS ERROR]", e)
-                # Nếu đã phát một phần câu, KHÔNG đọc lại từ đầu bằng fallback.
-                if e.played_audio:
-                    print("[TTS FALLBACK] skipped because VieNeu already played part of the utterance")
-                    return
+                print("[VIENEU ONLY] TTS stopped; no other voice will be used")
+                return
             except Exception as e:
                 print("[VIENEU TTS ERROR]", e)
+                print("[VIENEU ONLY] TTS stopped; no other voice will be used")
+                return
 
+        # Other explicitly selected engines retain their original behavior.
         if TTS_EDGE_FALLBACK:
             try:
-                print("[TTS FALLBACK] Edge TTS")
+                print("[TTS] Edge TTS")
                 self._edge(text)
                 return
             except Exception as e:
                 print("[EDGE TTS ERROR]", e)
 
         if TTS_PYTTSX3_FALLBACK:
-            print("[TTS FALLBACK] pyttsx3")
+            print("[TTS] pyttsx3")
             self._pyttsx3(text)
             return
 
@@ -144,7 +146,12 @@ class DichVuDocGiongNoi:
         settings = tai_cai_dat()
         voice = settings.get("vieneu_voice") or VIENEU_VOICE
         start_buffer_ms = int(settings.get("vieneu_start_buffer_ms", VIENEU_START_BUFFER_MS))
-        first_audio_timeout = float(settings.get("vieneu_first_audio_timeout", VIENEU_FIRST_AUDIO_TIMEOUT))
+        # user_settings.json may still contain the old 2-second timeout.
+        # Never abort VieNeu prematurely: the first audio can arrive just after 2s.
+        first_audio_timeout = max(
+            10.0,
+            float(settings.get("vieneu_first_audio_timeout", VIENEU_FIRST_AUDIO_TIMEOUT)),
+        )
         stream_stall_timeout = float(settings.get("vieneu_stream_stall_timeout", VIENEU_STREAM_STALL_TIMEOUT))
         output_device = settings.get("audio_output_device")
         output_blocksize = int(settings.get("vieneu_output_blocksize", 2048))

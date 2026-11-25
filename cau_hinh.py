@@ -54,8 +54,8 @@ TTS_ENGINE = os.getenv("TTS_ENGINE", "vieneu").strip().lower()
 VIENEU_VOICE = os.getenv("VIENEU_VOICE", "Mai Anh")
 VIENEU_BACKEND = os.getenv("VIENEU_BACKEND", "auto").strip().lower()
 VIENEU_SAMPLE_RATE = 48000
-VIENEU_START_BUFFER_MS = int(os.getenv("VIENEU_START_BUFFER_MS", "450"))
-VIENEU_FIRST_AUDIO_TIMEOUT = float(os.getenv("VIENEU_FIRST_AUDIO_TIMEOUT", "2.0"))
+VIENEU_START_BUFFER_MS = int(os.getenv("VIENEU_START_BUFFER_MS", "350"))
+VIENEU_FIRST_AUDIO_TIMEOUT = float(os.getenv("VIENEU_FIRST_AUDIO_TIMEOUT", "10.0"))
 VIENEU_STREAM_STALL_TIMEOUT = float(os.getenv("VIENEU_STREAM_STALL_TIMEOUT", "1.5"))
 VIENEU_PRELOAD = os.getenv("VIENEU_PRELOAD", "1").lower() in {"1", "true", "yes", "on"}
 
