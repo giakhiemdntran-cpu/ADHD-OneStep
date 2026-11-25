@@ -145,7 +145,7 @@ class DichVuDocGiongNoi:
 
         settings = tai_cai_dat()
         voice = settings.get("vieneu_voice") or VIENEU_VOICE
-        start_buffer_ms = int(settings.get("vieneu_start_buffer_ms", VIENEU_START_BUFFER_MS))
+        start_buffer_ms = int(VIENEU_START_BUFFER_MS)  # use config/env default 450ms, not stale user settings
         # user_settings.json may still contain the old 2-second timeout.
         # Never abort VieNeu prematurely: the first audio can arrive just after 2s.
         first_audio_timeout = max(
