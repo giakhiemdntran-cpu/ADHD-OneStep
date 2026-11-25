@@ -35,6 +35,7 @@ from huan_luyen_pcbm.huan_luyen_tu_csdl import (
 )
 from huan_luyen_pcbm.xay_dung_du_lieu import xay_dung_ban_ghi_hoc
 from dich_vu.dich_vu_pcbm import DichVuPCBM
+from pcbm_playground_y_kien import hien_thi_y_kien_playground
 from dich_vu.trich_xuat_thong_tin import trich_xuat_thong_tin_nhiem_vu
 
 
@@ -890,6 +891,7 @@ def hien_thi_quan_tri_huan_luyen_pcbm():
                 result = st.session_state.get("pcbm_pg_one_result")
                 if result:
                     _render_playground_result(result, compact=False)
+                    hien_thi_y_kien_playground(result, prefix="pg_one")
 
             with mode_three:
                 defaults = [x for x in ["test_U036", "test_U029", "test_U015"] if x in user_ids]
@@ -943,6 +945,11 @@ def hien_thi_quan_tri_huan_luyen_pcbm():
                         "💡 Điểm demo: cùng một nhiệm vụ và cùng Level ban đầu, PCBM có thể đưa ra "
                         "khuyến nghị khác nhau vì lịch sử hành vi của mỗi user khác nhau."
                     )
+                    st.markdown("#### 🗳️ Lấy ý kiến người dùng – so sánh 3 hồ sơ (DEMO)")
+                    index = st.selectbox("Hồ sơ để hỏi ý kiến", range(len(results)),
+                                         format_func=lambda i: str(results[i].get("user_id", i)),
+                                         key="pg_three_feedback_profile")
+                    hien_thi_y_kien_playground(results[index], prefix="pg_three")
         elif not user_ids:
             st.warning("Chưa có user trong bảng pcbm_events để chạy Playground.")
 
