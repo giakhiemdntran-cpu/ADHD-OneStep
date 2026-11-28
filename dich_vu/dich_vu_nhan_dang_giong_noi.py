@@ -11,6 +11,7 @@ import speech_recognition as sr
 
 from dich_vu.quan_ly_am_thanh import audio_lock, sau_dau_vao_giai_phong
 from dich_vu.cai_dat_nguoi_dung import tai_cai_dat
+from dich_vu.kiem_tra_nhieu import kiem_tra_chat_luong
 
 from cau_hinh import (
     VOICE_SAMPLE_RATE,
@@ -43,6 +44,9 @@ class DichVuNhanDangGiongNoi:
         self.on_audio_level = on_audio_level
         self.last_input_device = None
         self.last_native_sample_rate = None
+        self.last_noise_mean_abs = None
+        self.last_quality = {}
+        self.last_quality_error = ""
 
     def _lay_micro_mac_dinh(self):
         """Trả về thông tin input mặc định và sample rate native.
@@ -113,6 +117,7 @@ class DichVuNhanDangGiongNoi:
         silence_start = None
         speech_start = None
         noise_levels = []
+        self.last_noise_mean_abs = None
         calibration_start = time.time()
         threshold = VOICE_MIN_THRESHOLD
 
@@ -174,6 +179,7 @@ class DichVuNhanDangGiongNoi:
 
                 if noise_levels and not started:
                     noise = float(np.median(noise_levels))
+                    self.last_noise_mean_abs = noise
                     threshold = int(
                         max(
                             VOICE_MIN_THRESHOLD,
@@ -246,6 +252,17 @@ class DichVuNhanDangGiongNoi:
         sau_dau_vao_giai_phong()
 
         if audio is None:
+            return ""
+
+        ok, reason, stats = kiem_tra_chat_luong(
+            audio, VOICE_SAMPLE_RATE, self.last_noise_mean_abs
+        )
+        self.last_quality = stats
+        self.last_quality_error = reason
+        print(f"[ASR QUALITY] ok={ok} stats={stats} reason={reason!r}")
+        if not ok:
+            # Return empty result: Buddy's existing UI requests a repetition.
+            # No voice command reaches the intent router / task creation code.
             return ""
 
         errors = []

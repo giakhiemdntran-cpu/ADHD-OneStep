@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 from pathlib import Path
 
 from dich_vu.dich_vu_huan_luyen import thoi_quen_khoa_tu_tieu_de
@@ -16,6 +17,7 @@ class BoDinhTuyenYDinh:
         self.dich_vu_thi_giac = dich_vu_thi_giac
         self.dich_vu_pcbm = dich_vu_pcbm
         self.dieu_phoi_pcbm = DieuPhoiPCBM(dich_vu_pcbm, dich_vu_nhiem_vu) if dich_vu_pcbm else None
+        self._task_confirmation = None  # Not persisted until user explicitly confirms
 
     def _ngu_canh(self):
         t = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
@@ -60,22 +62,65 @@ class BoDinhTuyenYDinh:
 
         return {"reply": after, "state": "success"}
 
+    def _task_preview(self, cmd):
+        title = str(cmd.get("title") or "").strip()
+        when = str(cmd.get("scheduled_at") or cmd.get("scheduled_time") or "").replace("T", " ")
+        schedule = str(cmd.get("schedule_type") or "once")
+        if not when and schedule != "once":
+            when = f"lịch {schedule}"
+        return (f"Mình nghe được nhiệm vụ: {title}. "
+                + (f"Thời gian: {when}. " if when else "Chưa có giờ cụ thể. ")
+                + "Bạn xác nhận lưu nhé? Nói 'đồng ý' để lưu, 'sửa' để nói lại toàn bộ yêu cầu, hoặc 'hủy'.")
+
+    def _handle_task_confirmation(self, raw):
+        pending = self._task_confirmation
+        if not pending:
+            return None
+        # Pending belongs to one user only; never commit after user change.
+        if (time.monotonic() - pending['created'] > 120
+                or pending['user_id'] != self.dich_vu_nhiem_vu.active_user_id):
+            self._task_confirmation = None
+            return {"reply": "Yêu cầu xác nhận đã hết hạn hoặc bạn đã đổi người dùng. Vui lòng nói lại nhiệm vụ.", "state": "idle"}
+        answer = raw.strip().lower().strip(' .!?')
+        if answer in {'đồng ý', 'đúng', 'đúng rồi', 'xác nhận', 'lưu', 'lưu đi', 'ok', 'okay', 'có', 'vâng'}:
+            self._task_confirmation = None
+            return pending['cmd']
+        if answer in {'hủy', 'huỷ', 'không', 'không lưu', 'bỏ qua', 'thôi', 'cancel'}:
+            self._task_confirmation = None
+            return {"reply": "Mình đã hủy yêu cầu. Chưa có nhiệm vụ nào được lưu.", "state": "idle"}
+        if answer in {'sửa', 'sửa lại', 'không phải', 'sai rồi', 'nhận sai', 'đổi lại'}:
+            self._task_confirmation = None
+            return {"reply": "Mình chưa lưu gì cả. Bạn hãy nói lại đầy đủ tên nhiệm vụ và thời gian muốn nhắc nhé.", "state": "idle"}
+        # A full corrected request is processed anew, never use old pending data.
+        if any(p in answer for p in ('nhắc ', 'tạo nhiệm vụ', 'thêm nhiệm vụ', 'ghi việc', 'đặt lịch')):
+            self._task_confirmation = None
+            return None
+        return {"reply": "Mình chưa rõ bạn muốn lưu hay sửa. Hãy nói 'đồng ý', 'sửa', hoặc 'hủy'.", "state": "idle"}
+
     def xu_ly(self, text):
         raw = (text or "").strip()
         if not raw:
             return {"reply": "Mình chưa nghe rõ. Bạn nói lại nhé.", "state": "error"}
 
         low = raw.lower()
+        confirmation = self._handle_task_confirmation(raw)
+        if isinstance(confirmation, dict):
+            if 'intent' in confirmation:
+                confirmed_cmd = confirmation
+            else:
+                return confirmation
+        else:
+            confirmed_cmd = None
 
         # PCBM Coach commands are handled deterministically before the general LLM.
         # This keeps model numbers/reasons grounded in the actual PCBM pipeline.
-        if self.dieu_phoi_pcbm:
+        if self.dieu_phoi_pcbm and confirmed_cmd is None:
             pcbm_reply = self.dieu_phoi_pcbm.xu_ly_lenh(raw)
             if pcbm_reply is not None:
                 return pcbm_reply
 
         # Các lệnh thị giác rõ ràng được xử lý nhanh, không phụ thuộc bộ phân tích 1.5B.
-        if self.dich_vu_thi_giac:
+        if self.dich_vu_thi_giac and confirmed_cmd is None:
             if any(x in low for x in ["xem lại hình", "xem lại ảnh", "hiện lại hình", "hiện lại ảnh"]):
                 sight = self.dich_vu_thi_giac.lay_cuoi_da_trinh_bay_anh_chup()
                 if sight and sight.get("snapshot_path") and Path(sight["snapshot_path"]).exists():
@@ -109,12 +154,12 @@ class BoDinhTuyenYDinh:
                 return self._thi_giac_tim_phan_hoi(obj)
 
         # Hội thoại huấn luyện ghi nhớ v9 được ưu tiên hơn bộ phân tích LLM tổng quát.
-        if self.dich_vu_huan_luyen:
+        if self.dich_vu_huan_luyen and confirmed_cmd is None:
             memory_reply = self.dich_vu_huan_luyen.xu_ly_phan_hoi_giong_noi(raw)
             if memory_reply is not None:
                 return memory_reply
 
-        cmd = self.dich_vu_ai.phan_tich_lenh(raw)
+        cmd = confirmed_cmd if confirmed_cmd is not None else self.dich_vu_ai.phan_tich_lenh(raw)
         intent = cmd.get("intent", "chat")
         conf = float(cmd.get("confidence") or 0)
         print("[COMMAND]", cmd)
@@ -133,6 +178,18 @@ class BoDinhTuyenYDinh:
             title = (cmd.get("title") or "").strip()
             if not title:
                 return {"reply": "Bạn muốn mình giúp việc gì?", "state": "idle"}
+            if confirmed_cmd is None:
+                # A voice-created reminder without a concrete time must not be guessed.
+                schedule_type = str(cmd.get("schedule_type") or "once").lower()
+                if (('nhắc' in low or 'hẹn' in low)
+                        and not (cmd.get('scheduled_at') or cmd.get('scheduled_time'))
+                        and schedule_type == 'once'):
+                    return {"reply": "Mình đã nghe tên nhiệm vụ nhưng chưa rõ giờ. Bạn hãy nói lại đầy đủ nhiệm vụ và thời gian cụ thể nhé.", "state": "idle"}
+                self._task_confirmation = {
+                    'cmd': dict(cmd), 'created': time.monotonic(),
+                    'user_id': self.dich_vu_nhiem_vu.active_user_id,
+                }
+                return {"reply": self._task_preview(cmd), "state": "idle"}
             steps = self.dich_vu_huan_luyen.lap_cac_buoc(title) if (intent == "coach_task" and self.dich_vu_huan_luyen) else [title]
             habit = thoi_quen_khoa_tu_tieu_de(title)
             scheduled_at = cmd.get("scheduled_at")
