@@ -137,6 +137,8 @@ class CuaSoTroLy(QWidget):
         self.dich_vu_vong_deo.dam_bao_luoc_do()
         self.bo_dinh_tuyen = BoDinhTuyenYDinh(self.dich_vu_nhiem_vu, self.dich_vu_ai, self.dich_vu_huan_luyen, self.dich_vu_thi_giac, self.dich_vu_pcbm)
 
+        self._dang_dong = False  # PATCH36: window lifecycle / worker shutdown
+        self._khoa_luot_nghe = threading.Lock()
         self.kenh_tin_hieu = KenhTinHieu()
         self.kenh_tin_hieu.da_nghe.connect(self.khi_da_nghe)
         self.kenh_tin_hieu.loi.connect(self.khi_loi)
@@ -144,7 +146,7 @@ class CuaSoTroLy(QWidget):
         self.kenh_tin_hieu.ket_qua.connect(self.khi_ket_qua)
         self.kenh_tin_hieu.muc_am_thanh.connect(self.khi_co_muc_am_thanh)
         self.dich_vu_nhan_dang_giong_noi.on_audio_level = (
-            lambda rms, peak: self.kenh_tin_hieu.muc_am_thanh.emit(rms, peak)
+            lambda rms, peak: self._phat_tin_hieu_an_toan("muc_am_thanh", rms, peak)
         )
 
         self.trang_thai = "idle"
@@ -669,7 +671,7 @@ class CuaSoTroLy(QWidget):
         if hasattr(self, '_delete_voice_demo') and self._delete_voice_demo.stage != 'off':
             r = self._delete_voice_demo.handle(text)
             if r:
-                self.kenh_tin_hieu.ket_qua.emit(r)
+                self._phat_tin_hieu_an_toan("ket_qua", r)
                 return True
         if not getattr(self, "demo_coaching", None) or not self.demo_coaching.active:
             return False
@@ -679,7 +681,7 @@ class CuaSoTroLy(QWidget):
         if r.get("demo_status"):
             self._set_support_text(r["demo_status"])
             self.nhan_chat_muc_ho_tro.setText(r["demo_status"])
-        self.kenh_tin_hieu.ket_qua.emit(r)
+        self._phat_tin_hieu_an_toan("ket_qua", r)
         return True
 
     def doi_nguoi_dung_hien_tai(self, user_id):
@@ -835,6 +837,11 @@ class CuaSoTroLy(QWidget):
             self.o_nhap_chat.setFocus()
 
     def thoat_ung_dung(self):
+        self._dang_dong = True  # PATCH36: stop new STT cycles before app quit
+        try:
+            self.dich_vu_nhan_dang_giong_noi.on_audio_level = None
+        except Exception:
+            pass
         """Dừng audio/timer rồi thoát OneStep Buddy một cách gọn gàng."""
         try:
             self.dich_vu_doc_giong_noi.dung()
@@ -854,7 +861,12 @@ class CuaSoTroLy(QWidget):
         QApplication.instance().quit()
 
     def closeEvent(self, event):
-        """Áp dụng cùng cơ chế dọn dẹp nếu cửa sổ bị đóng từ hệ điều hành."""
+        """PATCH36: mark shutdown before Qt deletes the signal channel."""
+        self._dang_dong = True
+        try:
+            self.dich_vu_nhan_dang_giong_noi.on_audio_level = None
+        except Exception:
+            pass
         try:
             self.dich_vu_doc_giong_noi.dung()
         except Exception:
@@ -999,9 +1011,9 @@ class CuaSoTroLy(QWidget):
 
         def tien_trinh():
             try:
-                self.kenh_tin_hieu.ket_qua.emit(self.bo_dinh_tuyen.xu_ly(text))
+                self._phat_tin_hieu_an_toan("ket_qua", self.bo_dinh_tuyen.xu_ly(text))
             except Exception as e:
-                self.kenh_tin_hieu.loi.emit(str(e))
+                self._phat_tin_hieu_an_toan("loi", str(e))
 
         threading.Thread(target=tien_trinh, daemon=True).start()
 
@@ -1168,8 +1180,29 @@ class CuaSoTroLy(QWidget):
             print(f"[PROMPT LEVEL {level}]", prompt["text"])
             self.noi(prompt["text"], "idle")
 
+    def _phat_tin_hieu_an_toan(self, ten, *args):
+        """PATCH36: Qt may destroy QObject while a Python worker is still active.
+        Never emit to an invalid wrapper. This intentionally ignores only
+        late lifecycle errors; it does not mask normal business logic errors.
+        """
+        if getattr(self, "_dang_dong", False):
+            return False
+        try:
+            from shiboken6 import isValid
+            bus = getattr(self, "kenh_tin_hieu", None)
+            if bus is None or not isValid(bus):
+                return False
+            getattr(bus, ten).emit(*args)
+            return True
+        except (RuntimeError, ReferenceError) as exc:
+            print("[QT SIGNAL SKIPPED]", ten, type(exc).__name__, str(exc))
+            return False
+
     def lang_nghe(self):
-        if self.dang_nghe or self.dang_noi or self.dang_xu_ly:
+        if self._dang_dong or self.dang_nghe or self.dang_noi or self.dang_xu_ly:
+            return
+        if not self._khoa_luot_nghe.acquire(blocking=False):
+            print("[STT] Previous listening worker is still active; skipping overlap")
             return
         self.dang_nghe = True
         self.dat_trang_thai("listening")
@@ -1184,12 +1217,23 @@ class CuaSoTroLy(QWidget):
                 short_reply = waiting_task or waiting_delete or waiting_demo
                 print('[STT CONTEXT] short_reply=', short_reply,
                       'task=', waiting_task, 'delete=', waiting_delete, 'demo=', waiting_demo)
-                self.kenh_tin_hieu.da_nghe.emit(self.dich_vu_nhan_dang_giong_noi.lang_nghe_mot_lan(confirmation_mode=short_reply))
+                ket_qua = self.dich_vu_nhan_dang_giong_noi.lang_nghe_mot_lan(confirmation_mode=short_reply)
+                self._phat_tin_hieu_an_toan("da_nghe", ket_qua)
             except Exception as e:
-                self.kenh_tin_hieu.loi.emit(str(e))
-        threading.Thread(target=tien_trinh, daemon=True).start()
+                if not self._dang_dong:
+                    self._phat_tin_hieu_an_toan("loi", str(e))
+            finally:
+                self._khoa_luot_nghe.release()
+        try:
+            threading.Thread(target=tien_trinh, daemon=True).start()
+        except Exception:
+            self.dang_nghe = False
+            self._khoa_luot_nghe.release()
+            raise
 
     def khi_da_nghe(self, text):
+        if self._dang_dong:
+            return
         # Một tin nhắn bàn phím có thể đã được gửi trong khi thread STT còn chạy.
         # Bỏ kết quả cũ để tránh xử lý hai câu cùng lúc.
         if self._bo_qua_luot_nghe_tiep_theo:
@@ -1219,9 +1263,9 @@ class CuaSoTroLy(QWidget):
 
         def tien_trinh():
             try:
-                self.kenh_tin_hieu.ket_qua.emit(self.bo_dinh_tuyen.xu_ly(text))
+                self._phat_tin_hieu_an_toan("ket_qua", self.bo_dinh_tuyen.xu_ly(text))
             except Exception as e:
-                self.kenh_tin_hieu.loi.emit(str(e))
+                self._phat_tin_hieu_an_toan("loi", str(e))
         threading.Thread(target=tien_trinh, daemon=True).start()
 
     def khi_ket_qua(self, r):
@@ -1296,7 +1340,7 @@ class CuaSoTroLy(QWidget):
         self._after = after_state
         self.them_vao_lich_su_chat("assistant", text)
         self.dat_trang_thai("speaking", text)
-        self.dich_vu_doc_giong_noi.noi(text, lambda: self.kenh_tin_hieu.doc_giong_noi_xong.emit())
+        self.dich_vu_doc_giong_noi.noi(text, lambda: self._phat_tin_hieu_an_toan("doc_giong_noi_xong"))
 
     def khi_doc_giong_noi_xong(self):
         self.dang_noi = False
@@ -1314,6 +1358,8 @@ class CuaSoTroLy(QWidget):
             QTimer.singleShot(650, self.lang_nghe)
 
     def khi_loi(self, e):
+        if self._dang_dong:
+            return
         self.dang_nghe = False
         self.dang_noi = False
         self.dang_xu_ly = False

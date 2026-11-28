@@ -1,5 +1,6 @@
 import os
 import queue
+from collections import deque
 import subprocess
 import time
 import wave
@@ -116,12 +117,13 @@ class DichVuNhanDangGiongNoi:
         # It is not a license to treat fan noise as speech.
         capture_start_timeout = (8.0 if confirmation_mode else VOICE_START_TIMEOUT)
         calibration_seconds = (0.30 if confirmation_mode else VOICE_NOISE_CALIBRATION_SECONDS)
-        silence_seconds = (0.60 if confirmation_mode else VOICE_SILENCE_DURATION)
+        silence_seconds = (0.90 if confirmation_mode else VOICE_SILENCE_DURATION)
         max_record_seconds = (6.0 if confirmation_mode else VOICE_MAX_RECORD_SECONDS)
         if confirmation_mode:
-            print('[STT REPLY MODE] short=True calibration=0.30s silence=0.60s start_timeout=8.0s')
+            print('[STT REPLY MODE] short=True calibration=0.30s silence=0.90s pre_roll=0.35s start_timeout=8.0s')
         q = queue.Queue()
         chunks = []
+        pre_roll = deque(maxlen=12)  # ~0.35s at 44.1 kHz for 512 samples/16k block
         started = False
         silence_start = None
         speech_start = None
@@ -178,6 +180,9 @@ class DichVuNhanDangGiongNoi:
                         flush=True,
                     )
 
+                if not started and confirmation_mode:
+                    pre_roll.append(data.copy())
+
                 if (
                     not started
                     and time.time() - calibration_start
@@ -194,7 +199,7 @@ class DichVuNhanDangGiongNoi:
                             VOICE_MIN_THRESHOLD,
                             min(
                                 VOICE_MAX_THRESHOLD,
-                                noise * VOICE_THRESHOLD_MULTIPLIER,
+                                noise * (min(VOICE_THRESHOLD_MULTIPLIER, 2.20) if confirmation_mode else VOICE_THRESHOLD_MULTIPLIER),
                             ),
                         )
                     )
@@ -206,7 +211,11 @@ class DichVuNhanDangGiongNoi:
                     if level > threshold:
                         started = True
                         speech_start = time.time()
-                        chunks.append(data)
+                        if confirmation_mode:
+                            chunks.extend(pre_roll)
+                            pre_roll.clear()
+                        else:
+                            chunks.append(data)
                         print("[STT] Bắt đầu nói")
                     elif time.time() - wait_start > capture_start_timeout:
                         print("[STT] Không phát hiện giọng nói")
@@ -297,12 +306,23 @@ class DichVuNhanDangGiongNoi:
                 print("[STT ONLINE ERROR]", e)
                 errors.append("Google STT: " + str(e))
 
+        # Do not try to launch an unavailable whisper-cli (typical Jetson
+        # installation). Treat an unrecognized short reply as an empty transcript;
+        # the pending confirmation remains active and the user can retry/type.
+        whisper_path = Path(str(WHISPER_EXE))
+        if not whisper_path.is_file() or not os.access(whisper_path, os.X_OK):
+            print(f"[STT FALLBACK] whisper-cli unavailable: {whisper_path}; keeping confirmation pending")
+            if errors:
+                print("[STT FALLBACK] online details:", " | ".join(errors))
+            return ""
         try:
             return self._whisper(audio)
         except Exception as e:
             errors.append("Whisper: " + str(e))
 
-        raise RuntimeError(" | ".join(errors))
+        # Network / recognizer failures should not destroy pending state.
+        print("[STT FALLBACK] no transcript:", " | ".join(errors))
+        return ""
 
     def _google(self, audio):
         rec = sr.Recognizer()
