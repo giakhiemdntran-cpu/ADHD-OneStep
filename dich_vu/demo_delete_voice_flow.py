@@ -39,6 +39,15 @@ class DemoDeleteVoiceFlow:
         if self.stage=='off':
             return None
         s=normalize(text)
+        # ONESTEP_PATCH34_SHORT_REPLY: full natural cancellation phrases.
+        if self.stage in ('confirm_identity', 'confirm_deletion') and (
+                'huy' in s.split() or 'bo qua' in s or 'dung xoa' in s or
+                'khong dong y' in s or 'thoi' in s.split()):
+            self.stage='waiting_command'
+            self.candidate=None
+            print('[DEMO CANCEL] pending request cancelled')
+            return {'reply':'Mình đã hủy yêu cầu đang chờ. Lịch demo vẫn còn.',
+                    'demo':True, 'state':'idle'}
         if not s:
             return {'reply':'Mình chưa nghe rõ. Bạn thử nói lại yêu cầu xóa nhé.','demo':True,'state':'idle'}
         if self.stage=='waiting_command':

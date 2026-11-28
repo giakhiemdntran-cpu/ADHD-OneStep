@@ -1176,7 +1176,15 @@ class CuaSoTroLy(QWidget):
 
         def tien_trinh():
             try:
-                self.kenh_tin_hieu.da_nghe.emit(self.dich_vu_nhan_dang_giong_noi.lang_nghe_mot_lan())
+                # ONESTEP_PATCH34_SHORT_REPLY: derive pending context at listen start.
+                waiting_task = bool(getattr(self.bo_dinh_tuyen, '_task_confirmation', None))
+                waiting_delete = bool(getattr(self.bo_dinh_tuyen, '_delete_confirmation', None))
+                demo_flow = getattr(self, '_delete_voice_demo', None)
+                waiting_demo = bool(demo_flow is not None and getattr(demo_flow, 'stage', '') in ('confirm_identity', 'confirm_deletion'))
+                short_reply = waiting_task or waiting_delete or waiting_demo
+                print('[STT CONTEXT] short_reply=', short_reply,
+                      'task=', waiting_task, 'delete=', waiting_delete, 'demo=', waiting_demo)
+                self.kenh_tin_hieu.da_nghe.emit(self.dich_vu_nhan_dang_giong_noi.lang_nghe_mot_lan(confirmation_mode=short_reply))
             except Exception as e:
                 self.kenh_tin_hieu.loi.emit(str(e))
         threading.Thread(target=tien_trinh, daemon=True).start()
@@ -1191,7 +1199,14 @@ class CuaSoTroLy(QWidget):
 
         self.dang_nghe = False
         if not text:
-            self.dat_trang_thai("error", "Mình chưa nghe rõ. Bạn nói lại nhé.")
+            # Empty STT does not clear a pending confirmation or cancel it.
+            waiting = bool(getattr(self.bo_dinh_tuyen, '_task_confirmation', None) or
+                           getattr(self.bo_dinh_tuyen, '_delete_confirmation', None))
+            demo = getattr(self, '_delete_voice_demo', None)
+            waiting = waiting or bool(demo and getattr(demo, 'stage', '') in ('confirm_identity', 'confirm_deletion'))
+            self.dat_trang_thai('error',
+                'Chưa nhận được câu trả lời. Bạn có thể nói «đồng ý» hoặc «hủy» lần nữa.'
+                if waiting else 'Mình chưa nghe rõ. Bạn nói lại nhé.')
             QTimer.singleShot(900, self.lang_nghe)
             return
         print("[HEARD]", text)

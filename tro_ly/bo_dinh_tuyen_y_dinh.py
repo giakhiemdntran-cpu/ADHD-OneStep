@@ -145,6 +145,22 @@ class BoDinhTuyenYDinh:
             return {"reply": "Mình chưa nghe rõ. Bạn nói lại nhé.", "state": "error"}
 
         low = raw.lower()
+        # ONESTEP_PATCH34_SHORT_REPLY: cancel naturally worded pending requests.
+        import re as _patch34_re
+        import unicodedata as _patch34_ud
+        def _patch34_normalize(message):
+            norm = str(message).casefold().replace('đ', 'd')
+            norm = ''.join(ch for ch in _patch34_ud.normalize('NFD', norm)
+                           if _patch34_ud.category(ch) != 'Mn')
+            return ' '.join(_patch34_re.findall(r'[a-z0-9]+', norm))
+        _s = _patch34_normalize(raw)
+        _cancel = bool(_patch34_re.search(
+            r'(?:^|\b)(?:huy|huy bo|bo qua|thoi|dung lai|khong dong y|khong luu|khong xoa|dung xoa|dung luu)(?:\b|$)', _s))
+        if _cancel and (self._task_confirmation is not None or self._delete_confirmation is not None):
+            self._task_confirmation = None
+            self._delete_confirmation = None
+            print('[CONFIRM CANCEL] pending request discarded, no database write')
+            return {'reply': 'Mình đã hủy yêu cầu đang chờ. Không lưu hoặc xóa nhiệm vụ nào.', 'state': 'idle'}
         # Pending destructive actions are resolved BEFORE any LLM/coach routing.
         if self._delete_confirmation is not None:
             return self._handle_delete_confirmation(raw)

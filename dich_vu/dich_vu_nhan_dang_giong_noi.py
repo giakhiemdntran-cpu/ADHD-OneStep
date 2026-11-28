@@ -110,7 +110,16 @@ class DichVuNhanDangGiongNoi:
         y = np.interp(new_positions, old_positions, x.astype(np.float64))
         return np.clip(np.rint(y), -32768, 32767).astype(np.int16)
 
-    def _ghi_den_khi_im_lang(self):
+    def _ghi_den_khi_im_lang(self, confirmation_mode=False):
+        # ONESTEP_PATCH34_SHORT_REPLY: separate endpoint settings for 1-3 word replies.
+        # A shorter endpoint is useful after Buddy has asked a confirmation question.
+        # It is not a license to treat fan noise as speech.
+        capture_start_timeout = (8.0 if confirmation_mode else VOICE_START_TIMEOUT)
+        calibration_seconds = (0.30 if confirmation_mode else VOICE_NOISE_CALIBRATION_SECONDS)
+        silence_seconds = (0.60 if confirmation_mode else VOICE_SILENCE_DURATION)
+        max_record_seconds = (6.0 if confirmation_mode else VOICE_MAX_RECORD_SECONDS)
+        if confirmation_mode:
+            print('[STT REPLY MODE] short=True calibration=0.30s silence=0.60s start_timeout=8.0s')
         q = queue.Queue()
         chunks = []
         started = False
@@ -172,7 +181,7 @@ class DichVuNhanDangGiongNoi:
                 if (
                     not started
                     and time.time() - calibration_start
-                    < VOICE_NOISE_CALIBRATION_SECONDS
+                    < calibration_seconds
                 ):
                     noise_levels.append(level)
                     continue
@@ -199,7 +208,7 @@ class DichVuNhanDangGiongNoi:
                         speech_start = time.time()
                         chunks.append(data)
                         print("[STT] Bắt đầu nói")
-                    elif time.time() - wait_start > VOICE_START_TIMEOUT:
+                    elif time.time() - wait_start > capture_start_timeout:
                         print("[STT] Không phát hiện giọng nói")
                         return None
                     continue
@@ -211,11 +220,11 @@ class DichVuNhanDangGiongNoi:
                 else:
                     if silence_start is None:
                         silence_start = time.time()
-                    elif time.time() - silence_start >= VOICE_SILENCE_DURATION:
+                    elif time.time() - silence_start >= silence_seconds:
                         print("[STT] Im lặng -> dừng thu")
                         break
 
-                if time.time() - speech_start >= VOICE_MAX_RECORD_SECONDS:
+                if time.time() - speech_start >= max_record_seconds:
                     print("[STT] Đạt giới hạn ghi âm")
                     break
 
@@ -239,10 +248,10 @@ class DichVuNhanDangGiongNoi:
 
         return native_audio.astype(np.int16, copy=False)
 
-    def lang_nghe_mot_lan(self):
+    def lang_nghe_mot_lan(self, confirmation_mode=False):
         with audio_lock:
             try:
-                audio = self._ghi_den_khi_im_lang()
+                audio = self._ghi_den_khi_im_lang(confirmation_mode=confirmation_mode)
             finally:
                 try:
                     sd.stop()
@@ -254,9 +263,20 @@ class DichVuNhanDangGiongNoi:
         if audio is None:
             return ""
 
-        ok, reason, stats = kiem_tra_chat_luong(
-            audio, VOICE_SAMPLE_RATE, self.last_noise_mean_abs
-        )
+        # For a short ACK, only reduce minimum duration; do NOT bypass clipping,
+        # overall loudness or ambient SNR checks. Restore env in finally.
+        if confirmation_mode:
+            from dich_vu.kiem_tra_nhieu import kiem_tra_chat_luong as check_quality
+            # Use the same quality checker, with per-turn duration parameter
+            # rather than global environment mutation.
+            ok, reason, stats = check_quality(
+                audio, VOICE_SAMPLE_RATE, self.last_noise_mean_abs,
+                min_seconds=0.16,
+            )
+        else:
+            ok, reason, stats = kiem_tra_chat_luong(
+                audio, VOICE_SAMPLE_RATE, self.last_noise_mean_abs
+            )
         self.last_quality = stats
         self.last_quality_error = reason
         print(f"[ASR QUALITY] ok={ok} stats={stats} reason={reason!r}")
@@ -269,7 +289,10 @@ class DichVuNhanDangGiongNoi:
 
         if STT_ONLINE_FIRST:
             try:
-                return self._google(audio)
+                online_text = self._google(audio)
+                if online_text:
+                    return online_text
+                print('[STT REPLY] Online recognition empty; trying Whisper')
             except Exception as e:
                 print("[STT ONLINE ERROR]", e)
                 errors.append("Google STT: " + str(e))

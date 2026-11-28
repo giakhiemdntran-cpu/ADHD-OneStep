@@ -14,7 +14,7 @@ def _env_float(name, default):
         return float(default)
 
 
-def kiem_tra_chat_luong(audio, rate, noise_mean_abs=None):
+def kiem_tra_chat_luong(audio, rate, noise_mean_abs=None, min_seconds=None):
     """Return (accepted, reason, stats), without modifying the original recording.
 
     `noise_mean_abs` comes from the initial calibration in native PCM16 units.
@@ -30,7 +30,7 @@ def kiem_tra_chat_luong(audio, rate, noise_mean_abs=None):
     v = np.abs(x.astype(np.float32))
     stats['mean_abs'] = round(float(v.mean()), 1)
     stats['clipping_ratio'] = round(float(np.mean(v >= 32500)), 4)
-    min_dur = max(0., _env_float('ONESTEP_ASR_MIN_SECONDS', .38))
+    min_dur = max(0., float(min_seconds) if min_seconds is not None else _env_float('ONESTEP_ASR_MIN_SECONDS', .38))
     if duration < min_dur:
         return False, 'Mình nghe hơi ngắn. Bạn nói lại rõ hơn nhé.', stats
     if stats['clipping_ratio'] > _env_float('ONESTEP_ASR_MAX_CLIP_RATIO', .07):
