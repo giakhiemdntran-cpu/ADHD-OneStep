@@ -18,6 +18,36 @@ class DichVuNhiemVu:
         self.active_user_id = user_id or DEFAULT_USER_ID
         self.pcbm.active_user_id = self.active_user_id
 
+    def _ensure_task_owner(self):
+        # Legacy rows belong to DEFAULT_USER_ID by migration convention.
+        with lay_ket_noi_csdl() as c:
+            cols = {row[1] for row in c.execute("PRAGMA table_info(tasks)")}
+            if "user_id" not in cols:
+                c.execute("ALTER TABLE tasks ADD COLUMN user_id TEXT")
+            c.execute("UPDATE tasks SET user_id=? WHERE user_id IS NULL", (DEFAULT_USER_ID,))
+
+    def tim_nhiem_vu_cua_nguoi_dung(self):
+        self._ensure_task_owner()
+        with lay_ket_noi_csdl() as c:
+            rows = c.execute("SELECT * FROM tasks WHERE enabled=1 AND user_id=? ORDER BY id DESC", (self.active_user_id,)).fetchall()
+        return [self._nhiem_vu(r) for r in rows]
+
+    def huy_nhiem_vu_xac_nhan(self, task_id, expected_title, expected_scheduled_at):
+        self._ensure_task_owner()
+        now=datetime.now().isoformat(timespec="seconds")
+        with lay_ket_noi_csdl() as c:
+            row=c.execute("SELECT * FROM tasks WHERE id=? AND enabled=1 AND user_id=?", (task_id,self.active_user_id)).fetchone()
+            if not row or row['title']!=expected_title or row['scheduled_at']!=expected_scheduled_at:
+                return {"success":False,"message":"Nhiệm vụ đã thay đổi hoặc không thuộc tài khoản hiện tại. Chưa xóa gì cả."}
+            task=self._nhiem_vu(row)
+            c.execute("""INSERT INTO task_history(task_id,title,scheduled_at,completed_at,snooze_count,final_status,
+                        estimated_minutes,actual_minutes,start_delay_minutes,habit_key)
+                         VALUES(?,?,?,?,0,'cancelled',?,?,?,?)""",
+                      (task_id,task['title'],task.get('scheduled_at'),now,task.get('estimated_minutes'),None,None,task.get('habit_key')))
+            c.execute("DELETE FROM task_occurrences WHERE task_id=? AND status='pending'",(task_id,))
+            c.execute("DELETE FROM tasks WHERE id=? AND user_id=?",(task_id,self.active_user_id))
+        return {"success":True,"task_id":task_id,"title":task['title']}
+
     def _nhiem_vu(self,r):
         if r is None: return None
         d=dict(r)
@@ -54,13 +84,14 @@ class DichVuNhiemVu:
             scheduled_at=None
         else:
             raise ValueError("schedule_type không hợp lệ")
+        self._ensure_task_owner()
         with lay_ket_noi_csdl() as c:
             cur=c.execute("""
               INSERT INTO tasks(title,steps,schedule_type,scheduled_at,scheduled_time,repeat_days,enabled,created_by,created_at,
-                                estimated_minutes,deadline_at,habit_key)
-              VALUES(?,?,?,?,?,?,1,?,?,?,?,?)
+                                estimated_minutes,deadline_at,habit_key,user_id)
+              VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?)
             """,(title,json.dumps(steps,ensure_ascii=False),schedule_type,scheduled_at,scheduled_time,
-                   json.dumps(repeat_days),created_by,now.isoformat(timespec="seconds"),estimated_minutes,deadline_at,habit_key))
+                   json.dumps(repeat_days),created_by,now.isoformat(timespec="seconds"),estimated_minutes,deadline_at,habit_key,self.active_user_id))
             tid=cur.lastrowid
         self.dam_bao_lan_thuc_hien()
         return self.lay_nhiem_vu(tid)

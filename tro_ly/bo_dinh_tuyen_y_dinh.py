@@ -1,4 +1,5 @@
 from datetime import datetime
+from dich_vu.tra_cuu_xoa_nhiem_vu import resolve_candidates, describe
 import time
 from pathlib import Path
 
@@ -18,6 +19,7 @@ class BoDinhTuyenYDinh:
         self.dich_vu_pcbm = dich_vu_pcbm
         self.dieu_phoi_pcbm = DieuPhoiPCBM(dich_vu_pcbm, dich_vu_nhiem_vu) if dich_vu_pcbm else None
         self._task_confirmation = None  # Not persisted until user explicitly confirms
+        self._delete_confirmation = None
 
     def _ngu_canh(self):
         t = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()
@@ -97,12 +99,55 @@ class BoDinhTuyenYDinh:
             return None
         return {"reply": "Mình chưa rõ bạn muốn lưu hay sửa. Hãy nói 'đồng ý', 'sửa', hoặc 'hủy'.", "state": "idle"}
 
+    def _handle_delete_confirmation(self, raw):
+        pending=self._delete_confirmation
+        if pending is None: return None
+        if time.monotonic()-pending['created']>120 or pending['user_id']!=self.dich_vu_nhiem_vu.active_user_id:
+            self._delete_confirmation=None
+            return {"reply":"Xác nhận xóa đã hết hạn hoặc bạn đã đổi tài khoản. Chưa xóa gì cả.","state":"idle"}
+        answer=raw.strip().lower().strip(' .!?')
+        if answer in {'không','hủy','huỷ','bỏ qua','thôi','không xóa','không xoá','cancel'}:
+            self._delete_confirmation=None
+            return {"reply":"Đã hủy thao tác. Không có nhiệm vụ nào bị xóa.","state":"idle"}
+        candidates=pending['candidates']
+        if pending['stage']=='choose':
+            match=re.fullmatch(r'(?:số|task|nhiệm vụ)?\s*(\d+)',answer)
+            if match and 1<=int(match.group(1))<=len(candidates):
+                task=candidates[int(match.group(1))-1]
+                pending['stage']='confirm'; pending['task']=task
+                return {"reply":f"Bạn muốn xóa đúng nhiệm vụ {describe(task)} phải không? Hãy nói 'xác nhận xóa' hoặc 'không'.", "state":"idle"}
+            return {"reply":"Có nhiều nhiệm vụ tương tự. Hãy nói số thứ tự trong danh sách, hoặc nói 'hủy'. Chưa xóa gì cả.","state":"idle"}
+        if answer in {'xác nhận xóa','xác nhận xoá','đúng, xóa đi','đúng xóa đi','đồng ý xóa','đồng ý xoá','xóa đúng task này','xoá đúng task này'}:
+            task=pending['task']; self._delete_confirmation=None
+            result=self.dich_vu_nhiem_vu.huy_nhiem_vu_xac_nhan(task['id'],task['title'],task.get('scheduled_at'))
+            if not result.get('success'):
+                return {"reply":result.get('message','Chưa xóa nhiệm vụ.'),"state":"idle"}
+            if self.dich_vu_pcbm:
+                self.dich_vu_pcbm.ghi_su_kien('TASK_CANCELLED',task['id'],None,result)
+            return {"reply":f"Đã xóa nhiệm vụ {describe(task)} theo xác nhận của bạn.","state":"success","refresh":True}
+        return {"reply":"Mình đang chờ xác nhận xóa. Hãy nói chính xác 'xác nhận xóa' hoặc 'không'.", "state":"idle"}
+
+    def _request_delete_task(self, raw):
+        candidates=resolve_candidates(raw,self.dich_vu_nhiem_vu.tim_nhiem_vu_cua_nguoi_dung())
+        if not candidates:
+            return {"reply":"Mình không tìm thấy nhiệm vụ một lần nào khớp tên và thời gian bạn nói. Mình chưa xóa gì. Bạn có thể xem danh sách nhiệm vụ và nói rõ lại nhé.","state":"idle"}
+        if len(candidates)>5:
+            return {"reply":"Có quá nhiều nhiệm vụ gần giống. Hãy nói rõ hơn tên hoặc thời gian để tránh xóa nhầm.","state":"idle"}
+        self._delete_confirmation={"created":time.monotonic(),"user_id":self.dich_vu_nhiem_vu.active_user_id,"candidates":candidates,"stage":"choose" if len(candidates)>1 else "confirm","task":candidates[0] if len(candidates)==1 else None}
+        if len(candidates)==1:
+            return {"reply":f"Mình tìm thấy nhiệm vụ {describe(candidates[0])} trong cơ sở dữ liệu. Đây có đúng là nhiệm vụ bạn muốn xóa? Hãy nói 'xác nhận xóa' hoặc 'không'.", "state":"idle"}
+        listed='; '.join(f"số {i}: {describe(task)}" for i,task in enumerate(candidates,1))
+        return {"reply":f"Mình tìm thấy {len(candidates)} nhiệm vụ tương tự: {listed}. Bạn muốn xóa nhiệm vụ số mấy?", "state":"idle"}
+
     def xu_ly(self, text):
         raw = (text or "").strip()
         if not raw:
             return {"reply": "Mình chưa nghe rõ. Bạn nói lại nhé.", "state": "error"}
 
         low = raw.lower()
+        # Pending destructive actions are resolved BEFORE any LLM/coach routing.
+        if self._delete_confirmation is not None:
+            return self._handle_delete_confirmation(raw)
         confirmation = self._handle_task_confirmation(raw)
         if isinstance(confirmation, dict):
             if 'intent' in confirmation:
@@ -159,6 +204,9 @@ class BoDinhTuyenYDinh:
             if memory_reply is not None:
                 return memory_reply
 
+        # 'xóa' + a described task must always go through DB candidate matching.
+        if confirmed_cmd is None and any(x in low for x in ('xóa task','xoá task','xóa nhiệm vụ','xoá nhiệm vụ','xóa lịch','xoá lịch','hủy task','huỷ task','hủy nhiệm vụ','huỷ nhiệm vụ','xóa việc','xoá việc')):
+            return self._request_delete_task(raw)
         cmd = confirmed_cmd if confirmed_cmd is not None else self.dich_vu_ai.phan_tich_lenh(raw)
         intent = cmd.get("intent", "chat")
         conf = float(cmd.get("confidence") or 0)
@@ -275,13 +323,9 @@ class BoDinhTuyenYDinh:
                 self.dich_vu_pcbm.ghi_su_kien("SNOOZE", cur.get("task_id"), cur.get("occurrence_id"), {"minutes": mins})
             return {"reply": f"Được, mình sẽ kiểm tra lại sau {mins} phút.", "state": "idle", "refresh": True}
 
-        if intent == "cancel_task" and conf >= 0.55:
-            r = self.dich_vu_nhiem_vu.huy_hien_tai_nhiem_vu()
-            if not r.get("success"):
-                return {"reply": r.get("message", "Hiện không có nhiệm vụ nào để hủy."), "state": "idle"}
-            if self.dich_vu_pcbm:
-                self.dich_vu_pcbm.ghi_su_kien("TASK_CANCELLED", r.get("task_id"), None, r)
-            return {"reply": f"Được, mình đã hủy {r['title']}.", "state": "success", "refresh": True}
+        if intent in ("cancel_task", "delete_task") and conf >= 0.55:
+            # Never cancel the 'current' task implicitly. Resolve against stored records.
+            return self._request_delete_task(raw)
 
         if intent == "query_current_task" and conf >= 0.45:
             t = self.dich_vu_nhiem_vu.lay_nhiem_vu_hien_tai()

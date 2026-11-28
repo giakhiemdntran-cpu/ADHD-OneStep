@@ -161,13 +161,8 @@ class CuaSoTroLy(QWidget):
         self._trang_thai_sau_anh_chup = "idle"
 
         self.setWindowTitle("OneStep Buddy v10.9.2 PCBM")
-        # Desktop-friendly: không khóa Buddy luôn ở trên các cửa sổ khác.
-        # Alt+Tab do desktop/window manager xử lý; F11 chuyển fullscreen/maximized.
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
-        self._buddy_shortcut_fullscreen = QShortcut(QKeySequence("F11"), self)
-        self._buddy_shortcut_fullscreen.activated.connect(self.chuyen_che_do_cua_so)
-        self._buddy_shortcut_minimize = QShortcut(QKeySequence("Ctrl+Alt+M"), self)
-        self._buddy_shortcut_minimize.activated.connect(self.showMinimized)
+        # Kiosk: tránh Terminal/desktop che mất nửa dưới màn hình robot.
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         self.setCursor(Qt.BlankCursor)
         self.setStyleSheet("background:#F2F9F7;color:#20303A;")
 
@@ -632,7 +627,17 @@ class CuaSoTroLy(QWidget):
         self.cap_nhat_daily_coaching_plan()
         self._refresh_layout_after_mode_change()
 
+    def _one_step_delete_demo(self):
+        from dich_vu.demo_delete_voice_flow import DemoDeleteVoiceFlow
+        if not hasattr(self, '_delete_voice_demo'):
+            self._delete_voice_demo = DemoDeleteVoiceFlow()
+        return self._delete_voice_demo
+
     def reset_demo_coaching(self, profile_id):
+        if profile_id == "DEMO_DELETE_VOICE_WAIT":
+            self._one_step_delete_demo().reset()
+            self.dat_trang_thai("idle", "Đã nạp lịch Toán 19:00 ngày mai trong dữ liệu DEMO.")
+            return
         r = self.demo_coaching.reset(profile_id)
         self.demo_daily_store.reset_user(profile_id)
         self._demo_reminder_seen = {k for k in self._demo_reminder_seen if k[0] != profile_id}
@@ -643,6 +648,13 @@ class CuaSoTroLy(QWidget):
         self._refresh_layout_after_mode_change()
 
     def bat_dau_demo_coaching(self, profile_id):
+        if profile_id == "DEMO_DELETE_VOICE_WAIT":
+            # Prepare only. No speech, no search, no delete until user actually speaks.
+            self._one_step_delete_demo().start()
+            self.dat_trang_thai("idle", "Đã chuẩn bị lịch Toán 19:00 ngày mai. Bạn có thể nói yêu cầu xóa.")
+            return
+        if hasattr(self, '_delete_voice_demo'):
+            self._delete_voice_demo.stop()
         r = self.demo_coaching.start(profile_id)
         status = r.get("demo_status") or self.demo_coaching.status_text()
         self._set_support_text(status)
@@ -654,6 +666,11 @@ class CuaSoTroLy(QWidget):
         self.noi(r.get("reply", ""), "idle")
 
     def _xu_ly_demo_neu_can(self, text):
+        if hasattr(self, '_delete_voice_demo') and self._delete_voice_demo.stage != 'off':
+            r = self._delete_voice_demo.handle(text)
+            if r:
+                self.kenh_tin_hieu.ket_qua.emit(r)
+                return True
         if not getattr(self, "demo_coaching", None) or not self.demo_coaching.active:
             return False
         r = self.demo_coaching.handle(text)
@@ -1281,15 +1298,6 @@ class CuaSoTroLy(QWidget):
             # trước khi PortAudio mở lại microphone.
             QTimer.singleShot(650, self.lang_nghe)
 
-    def chuyen_che_do_cua_so(self):
-        """F11: chuyển giữa fullscreen và cửa sổ tối đa hóa có thanh hệ thống."""
-        if self.isFullScreen():
-            self.showMaximized()
-            self.unsetCursor()  # Nhìn thấy chuột khi làm việc trên desktop.
-        else:
-            self.showFullScreen()
-            self.setCursor(Qt.BlankCursor)
-
     def khi_loi(self, e):
         self.dang_nghe = False
         self.dang_noi = False
@@ -1314,6 +1322,8 @@ def chay_tro_ly():
     # và không làm lộ desktop/dock ở các cạnh. Các control phía trên đã
     # được thu nhỏ và lùi vào trong nên vẫn nằm trong vùng an toàn.
     w.showFullScreen()
-    # Không cưỡng chế raise_/activateWindow() sau khi mở;
-    # người dùng có thể Alt+Tab sang Terminal, Chromium, VS Code bình thường.
+    w.raise_()
+    w.activateWindow()
+    # Window manager (X11) có thể đổi thứ tự xếp cửa sổ ngay sau showFullScreen.
+    QTimer.singleShot(300, lambda: (w.raise_(), w.activateWindow()))
     sys.exit(app.exec())

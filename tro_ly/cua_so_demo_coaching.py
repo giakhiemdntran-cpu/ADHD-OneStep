@@ -24,6 +24,9 @@ class CuaSoDemoCoaching(QDialog):
         self.combo = QComboBox()
         for p in profiles:
             self.combo.addItem(p["label"], p["user_id"])
+        self.combo.insertSeparator(self.combo.count())
+        self.combo.addItem("🗑 Demo xóa lịch — chờ người dùng ra lệnh", "DEMO_DELETE_VOICE_WAIT")
+        self.combo.addItem("🗓 Tạo lịch / sửa khi nghe nhầm / xóa lịch (demo)", "DEMO_TASK_CONFIRM_DELETE")
         self.combo.currentIndexChanged.connect(self._update_desc)
         root.addWidget(self.combo)
         self.desc = QLabel()
@@ -52,6 +55,14 @@ class CuaSoDemoCoaching(QDialog):
 
     def _update_desc(self, *_):
         uid=self._selected()
+        if uid == "DEMO_DELETE_VOICE_WAIT":
+            self.desc.setText("Chỉ nạp sẵn trong SQLite demo: Làm bài tập Toán lúc 19:00 ngày mai. Buddy không nói hoặc xóa gì khi bắt đầu. Sau đó hãy NÓI hoặc GÕ yêu cầu xóa trên màn hình Buddy.")
+            self.plan.setText("Bước 1: Bắt đầu Demo → chờ. Bước 2: Nói: Xóa lịch làm bài tập Toán khoảng 7 giờ tối ngày mai. Bước 3: Xác nhận đúng nhiệm vụ. Bước 4: Xác nhận xóa.")
+            return
+        if uid == "DEMO_TASK_CONFIRM_DELETE":
+            self.desc.setText("Tình huống giao tiếp an toàn: Buddy nghe nhầm khi tạo lịch, người dùng sửa và xác nhận; khi xóa, Buddy tìm nhiệm vụ có sẵn trong SQLite demo và hỏi lại trước khi xóa.")
+            self.plan.setText("🗓 Dữ liệu có sẵn: Làm bài tập Toán lúc 19:30 ngày mai; Ôn tập Toán lúc 20:00; Đọc sách lúc 21:00. Chọn Bắt đầu Demo để mở kịch bản.")
+            return
         p=next((x for x in self.profiles if x["user_id"]==uid), {})
         habit = p.get("habit_summary", "")
         self.desc.setText(p.get("description", "") + ("\nThói quen: " + habit if habit else ""))
@@ -59,9 +70,29 @@ class CuaSoDemoCoaching(QDialog):
         self.plan.setText("🗓 Gợi ý trong ngày\n" + "   •   ".join(lines))
 
     def _reset(self):
+        if self._selected() == "DEMO_DELETE_VOICE_WAIT":
+            self.on_reset("DEMO_DELETE_VOICE_WAIT")
+            self.desc.setText("Đã khôi phục lịch mẫu 19:00 ngày mai; Buddy đang chờ yêu cầu.")
+            return
+        if self._selected() == "DEMO_TASK_CONFIRM_DELETE":
+            from pathlib import Path
+            from cau_hinh import BASE_DIR
+            from dich_vu.demo_task_store import DemoTaskStore
+            DemoTaskStore(Path(BASE_DIR)/"demo_coaching"/"task_confirmation_demo.sqlite3").reset()
+            self.desc.setText("✓ Đã khôi phục lịch mẫu trong SQLite demo. Không đụng đến lịch thật.")
+            return
         self.on_reset(self._selected())
         self.desc.setText(self.desc.text()+"\n✓ Dữ liệu demo đã được reset về seed ban đầu.")
 
     def _start(self):
+        if self._selected() == "DEMO_DELETE_VOICE_WAIT":
+            self.on_start("DEMO_DELETE_VOICE_WAIT")
+            self.accept()
+            return
+        if self._selected() == "DEMO_TASK_CONFIRM_DELETE":
+            from tro_ly.cua_so_demo_task import CuaSoDemoTask
+            dlg = CuaSoDemoTask(self)
+            dlg.exec()
+            return
         self.on_start(self._selected())
         self.accept()
